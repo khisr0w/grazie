@@ -7,27 +7,50 @@
     +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
 #if !defined(TENSOR_H)
 
-#define MAX_SHAPE_LENGTH 64
+typedef enum
+{
+    ops_None,
+
+    ops_UnaryNegate,
+    ops_UnaryBroadcast,
+
+    // NOTE(Abid): Element wise ops
+    ops_BinaryAdd,
+    ops_BinaryMult,
+    ops_BinarySub,
+
+    ops_BinaryMatmul
+} tensor_op;
 
 typedef struct
 {
-    int32 Sizes[MAX_SHAPE_LENGTH];
-    int32 Strides[MAX_SHAPE_LENGTH];
-    int32 Dim;
+    tensor_op TenOp;
 
+    void **Parents;
+} operands;
+
+typedef struct
+{
+    int32 *Sizes;
+    int32 *Strides;
+    int32 Dim;
     int32 Offset;
+
+    boolean IsLeaf;
+
+    operands Parents;
 } tensor_header;
 
 typedef struct
 {
-    tensor_header Header;
+    tensor_header *Header;
 
     int32 *Storage;
 } tensor_i32;
 
 typedef struct
 {
-    tensor_header Header;
+    tensor_header *Header;
 
     float32 *Storage;
 } tensor_f32;

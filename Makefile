@@ -9,13 +9,13 @@ RELEASE_DIR := $(BIN_DIR)/release
 
 # Compiler and flags
 CC := cl
-CFLAGS_COMMON := /EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208
+CFLAGS_COMMON := /EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208 /wd4505
 CFLAGS_DEBUG := /Od /MTd /Z7 /Zo /DDEBUG
 CFLAGS_RELEASE := /O2 /Oi /MT /DRELEASE
 
 # Source files
 # SOURCES := $(wildcard $(SRC_DIR)/*.cpp)
-SOURCES := $(SRC_DIR)/main.cpp
+SOURCES := $(SRC_DIR)/main.c
 
 # Object files
 # OBJECTS_DEBUG := $(patsubst $(SRC_DIR)/%.cpp,$(DEBUG_DIR)/%.obj,$(SOURCES))
@@ -42,7 +42,7 @@ $(DEBUG_DIR):
 	@echo Starting debug build...
 	@mkdir -p $(DEBUG_DIR)
 
-$(DEBUG_DIR)/main.obj: $(SRC_DIR)/main.cpp
+$(DEBUG_DIR)/main.obj: $(SRC_DIR)/main.c
 	@echo "    [Debug] Compiling Objects..."
 	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) /Fo$@ /c $<
 
@@ -60,7 +60,7 @@ $(RELEASE_DIR):
 	@echo Starting release build...
 	@mkdir -p $(RELEASE_DIR)
 
-$(RELEASE_DIR)/main.obj: $(SRC_DIR)/main.cpp
+$(RELEASE_DIR)/main.obj: $(SRC_DIR)/main.c
 	@echo "    Compiling Objects..."
 	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) /Fo$@ /c $<
 
