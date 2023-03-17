@@ -5,12 +5,13 @@
     - Create a fixed memory scheme that would be done at the start up
       - Check that after operations, the only the oldest non-leaf tensor gets overwritten.
     - Better (effecient) implementation of the tensor operations, maybe start with the the MatMul
+    - Make the tensor struct more generic so we can have float and int at the same time.
 
     DODO:
     - Change the structure of the tensor so that they are pointers, avoid copying them around
     - How to resolve the issue of freeing the memory of intermediate results, in case we call 'No grad' on them.
 
- */
+*/
 
 #include <stdio.h>
 #include <math.h>
@@ -66,9 +67,9 @@ int main()
                             )
                         );
 
+    GRAD_PRESERVE_TOGGLE();
 
     PrintI32Tensor(TenMul);
-    GRAD_PRESERVE_TOGGLE();
 
     // PrintTensor(Ten1);
     // printf("\n\t*\n\n");

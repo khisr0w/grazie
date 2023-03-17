@@ -56,7 +56,7 @@ I32TenAssign(tensor_i32 Tensor)
     return Tensor;
 }
 
-internal tensor_i32
+internal inline tensor_i32
 I32TensorCreateTempOrPerm(int32 *Shape, int32 ShapeLength, int32 *Data, size_t DataLength,
                           boolean Intialize)
 {
@@ -103,8 +103,8 @@ I32TensorCreateTempOrPerm(int32 *Shape, int32 ShapeLength, int32 *Data, size_t D
 }
 
 #define I32TenCreateAssign(Shape, Data) _I32TenCreateAssign(Shape, ArrayLength(Shape),\
-                                                                  Data, ArrayLength(Data),\
-                                                                  true)
+                                                            Data, ArrayLength(Data),\
+                                                            true)
 internal inline tensor_i32
 _I32TenCreateAssign(int32 *Shape, int32 ShapeLength, int32 *Data, size_t DataLength,
                    boolean Intialize)
@@ -229,7 +229,7 @@ PrintF32Tensor(tensor_f32 Tensor)
     }
     printf("\n");
 
-    if(!IS_GRAD_PRESERVE() && !Tensor.Header->IsLeaf) Free(Tensor.Header);
+    if(!Tensor.Header->IsLeaf) Free(Tensor.Header);
     Free(AccessDims);
 }
 
@@ -270,7 +270,7 @@ PrintI32Tensor(tensor_i32 Tensor)
     }
     printf("\n");
 
-    if(!IS_GRAD_PRESERVE() && !Tensor.Header->IsLeaf) Free(Tensor.Header);
+    if(!Tensor.Header->IsLeaf) Free(Tensor.Header);
     Free(AccessDims);
 }
 
