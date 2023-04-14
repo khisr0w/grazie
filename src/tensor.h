@@ -36,7 +36,8 @@ typedef struct
     int32 Dim;
     int32 Offset;
 
-    boolean IsLeaf;
+    // boolean IsPersist;
+    boolean ShouldGrad;
 
     operands Parents;
 } tensor_header;

@@ -14,11 +14,6 @@
 
 #define ArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
 
-// TODO(Abid): The custum allocators should be defined here
-#define Free(ptr) free(ptr)
-#define Malloc(ptr) malloc(ptr)
-#define Calloc(ptr, size) calloc(ptr, size)
-
 // NOTE(Abid): Byte Macros
 #define Kilobyte(Value) ((Value)*1024LL)
 #define Megabyte(Value) (Kilobyte(Value)*1024LL)
@@ -39,10 +34,18 @@ typedef int8_t boolean;
 #define false 0
 
 // NOTE(Abid): Defines if op history should be preserved for gradient calculation
-global_var boolean GLOBAL_grazie_grad_history = true;
-#define GRAD_PRESERVE(Value) GLOBAL_grazie_grad_history = Value
-#define GRAD_PRESERVE_TOGGLE() GLOBAL_grazie_grad_history = !GLOBAL_grazie_grad_history
-#define IS_GRAD_PRESERVE() GLOBAL_grazie_grad_history
+#define GRAD_PRESERVE(Value) __GetSetGradState(true, Value)
+#define GRAD_PRESERVE_TOGGLE() __GetSetGradState(true, !IS_GRAD_PRESERVE())
+#define IS_GRAD_PRESERVE() (__GetSetGradState(false, 0))
+internal inline
+boolean __GetSetGradState(boolean Set, boolean NewState)
+{
+    local_persist boolean ShouldGrad = true;
+
+    if (Set) ShouldGrad = NewState;
+
+    return ShouldGrad;
+}
 
 #define UTILS_H
 #endif

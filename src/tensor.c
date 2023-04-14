@@ -6,6 +6,34 @@
     |                                                                                  |
     +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
 
+/*
+   NOTE(Abid): Here how the memory mapping is supposedly going to work for tensors.
+
+   - If `no_grad` is turned on, we will go through the same math operation as if its off;
+     however, in this case we will set the variable `ShouldGrad` to false. When going
+     through the autograd, we will skip computing the gradient for said tensors.
+     TODO(Abid): It must be checked that the user do not compute the grad of a tensor
+                 based on a tensor that's before a 'no-grad' computation. So, always
+                 check the `ShouldGrad` of operands.
+
+   - It's also important for the operation memory to be flushed after each
+     run through the loop, so that we can re-use the same memory again.
+     Perhaps a function called `BackwardAndFlush()` be used for this.
+     TODO(Abid): We could have a check at the start of each loop to see if its free.
+
+   - The `PrintTensor` will be a macro where it will reset its memory footprint after the
+     function __UnsafePrintTensor is done being called. Therefore, if there was an adhoc
+     computation at the argument of PrintTensor, then we will print and free the memory.
+
+   - To remove a non-presistent tensor, we will go through all the operands who is not
+     persistent and free those as well.
+
+   - When computing a tensor inside a for loop, if we've already got non-persistent
+     operands from the computation of previous steps AND the the shape and memory
+     requirements are the same as our new computation, then simply override.
+     Otherwise, we free the memory and allocate new one that fits the requirements. (MAYBE!)
+ */
+
 #include "tensor.h"
 
 #if 0
@@ -49,16 +77,18 @@ F32Tensor_(int32 *Shape, int32 ShapeLength, float32 *Data = NULL, size_t DataLen
 }
 #endif
 
+#if 0
 internal inline tensor_i32
 I32TenAssign(tensor_i32 Tensor)
 {
-    Tensor.Header->IsLeaf = true;
+    // Tensor.Header->IsPersist = true;
     return Tensor;
 }
+#endif
 
+#define I32Tensor(Shape, Data) _I32Tensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
 internal inline tensor_i32
-I32TensorCreateTempOrPerm(int32 *Shape, int32 ShapeLength, int32 *Data, size_t DataLength,
-                          boolean Intialize)
+_I32Tensor(int32 *Shape, int32 ShapeLength, int32 *Data, size_t DataLength, boolean Intialize)
 {
     tensor_i32 Result = {0};
 
@@ -75,7 +105,9 @@ I32TensorCreateTempOrPerm(int32 *Shape, int32 ShapeLength, int32 *Data, size_t D
     Assert(Result.Header, "Storage memory cannot be allocated");
     Result.Header->Sizes = (int32 *)(Result.Header+1);
     Result.Header->Strides = (int32 *)(Result.Header->Sizes + ShapeLength);
-    Result.Header->IsLeaf = false;
+    // Result.Header->IsPersist = false;
+    // NOTE(Abid): Setting whether to compute the backward pass or not
+    Result.Header->ShouldGrad = IS_GRAD_PRESERVE() ? true : false;
     Result.Storage = (int32 *)(Result.Header->Strides + ShapeLength);
     
     // NOTE(Abid): Setting Default Values
@@ -89,7 +121,7 @@ I32TensorCreateTempOrPerm(int32 *Shape, int32 ShapeLength, int32 *Data, size_t D
     {
         for (int32 i = 0; i < (Result.Header->Dim-1); ++i)
             for (int32 j = i+1; j < Result.Header->Dim; ++j) { Result.Header->Strides[i] *=
-                                                              Result.Header->Sizes[j]; }
+                                                               Result.Header->Sizes[j]; }
     }
 
     if(Intialize)
@@ -101,19 +133,6 @@ I32TensorCreateTempOrPerm(int32 *Shape, int32 ShapeLength, int32 *Data, size_t D
     
     return Result;
 }
-
-#define I32TenCreateAssign(Shape, Data) _I32TenCreateAssign(Shape, ArrayLength(Shape),\
-                                                            Data, ArrayLength(Data),\
-                                                            true)
-internal inline tensor_i32
-_I32TenCreateAssign(int32 *Shape, int32 ShapeLength, int32 *Data, size_t DataLength,
-                   boolean Intialize)
-{
-    tensor_i32 Result = I32TensorCreateTempOrPerm(Shape, ShapeLength, Data, DataLength,
-                                                  Intialize);
-    return I32TenAssign(Result);
-}
-
 
 internal inline size_t
 GetStorageSize(int32 *Sizes, int32 Dim)
@@ -160,7 +179,7 @@ IsShapeEqual(tensor_header *A, tensor_header *B)
 internal inline void
 _PrintTensorHeader(char *Name, tensor_header *TenHeader)
 {
-    printf(Name); printf(" -> shape (");
+    printf("%s", Name); printf(" -> shape (");
 
     for (int32 i = 0; i < (TenHeader->Dim-1); ++i) { printf("%d,", TenHeader->Sizes[i]); }
     printf("%d) =\n\n",TenHeader->Sizes[TenHeader->Dim-1]);
@@ -191,6 +210,10 @@ _PrintIsOuterAndUpdateDims(int32 *AccessDimIdx, int32 *AccessDims, tensor_header
 
     return IsOuterDim;
 }
+
+// TODO(Abid): The print currently is leaking memory since its not freeing the tensors that are
+//             the result of in-argument computations. Needs to be macro'ed out once memory
+//             module is written.
 
 internal void
 PrintF32Tensor(tensor_f32 Tensor)
@@ -229,7 +252,6 @@ PrintF32Tensor(tensor_f32 Tensor)
     }
     printf("\n");
 
-    if(!Tensor.Header->IsLeaf) Free(Tensor.Header);
     Free(AccessDims);
 }
 
@@ -270,7 +292,6 @@ PrintI32Tensor(tensor_i32 Tensor)
     }
     printf("\n");
 
-    if(!Tensor.Header->IsLeaf) Free(Tensor.Header);
     Free(AccessDims);
 }
 
@@ -301,31 +322,10 @@ tensor_i32
 I32TenAdd(tensor_i32 A, tensor_i32 B)
 {
     Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch");
-    tensor_i32 Result = {0};
-    tensor_i32 ToFree = {0};
+    tensor_i32 Result = _I32Tensor(A.Header->Sizes, B.Header->Dim, 0, 0, false);
 
-    // NOTE(Abid): Only make new tensor in memory if both operands are leaf tensors
-    if(!IS_GRAD_PRESERVE())
-    {
-        if (A.Header->IsLeaf && B.Header->IsLeaf)
-            Result = I32TensorCreateTempOrPerm(A.Header->Sizes, B.Header->Dim, 0, 0, false);
-        else
-        {
-            if(!A.Header->IsLeaf)
-            {
-                if(!B.Header->IsLeaf)
-                {
-                    // NOTE(Abid): Use the oldest tensor for new result, useful for the
-                    // fixed memory scheme.
-                    if (B.Header - A.Header > 0) { Result = A; ToFree = B; }
-                    else { Result = B; ToFree = A; }
-                }
-                else Result = A;
-            }
-            else Result = B;
-        }
-    }
-    else Result = I32TensorCreateTempOrPerm(A.Header->Sizes, B.Header->Dim, 0, 0, false);
+    // NOTE(Abid): We should not compute the grad in the backward case.
+    if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
 
     tensor_header *TenHeader = A.Header;
     int32 *AccessDims = (int32 *)Calloc(TenHeader->Dim, sizeof(int32));
@@ -350,7 +350,6 @@ I32TenAdd(tensor_i32 A, tensor_i32 B)
     }
 
     // NOTE(Abid): Free the superfluous allocations
-    if(ToFree.Header) Free(ToFree.Header);
     Free(AccessDims);
     return Result;
 }
@@ -359,31 +358,10 @@ tensor_i32
 I32TenMul(tensor_i32 A, tensor_i32 B)
 {
     Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch with * operation");
-    tensor_i32 Result = {0};
-    tensor_i32 ToFree = {0};
+    tensor_i32 Result = _I32Tensor(A.Header->Sizes, B.Header->Dim, 0, 0, false);
 
-    // NOTE(Abid): Only make new tensor in memory if both operands are leaf tensors
-    if(!IS_GRAD_PRESERVE())
-    {
-        if (A.Header->IsLeaf && B.Header->IsLeaf)
-            Result = I32TensorCreateTempOrPerm(A.Header->Sizes, B.Header->Dim, 0, 0, false);
-        else
-        {
-            if(!A.Header->IsLeaf)
-            {
-                if(!B.Header->IsLeaf)
-                {
-                    // NOTE(Abid): Use the oldest tensor for new result, useful for the
-                    // fixed memory scheme.
-                    if (B.Header - A.Header > 0) { Result = A; ToFree = B; }
-                    else { Result = B; ToFree = A; }
-                }
-                else Result = A;
-            }
-            else Result = B;
-        }
-    }
-    else Result = I32TensorCreateTempOrPerm(A.Header->Sizes, B.Header->Dim, 0, 0, false);
+    // NOTE(Abid): We should not compute the grad in the backward case.
+    if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
 
     tensor_header *TenHeader = A.Header;
     int32 *AccessDims = (int32 *)Calloc(TenHeader->Dim, sizeof(int32));
@@ -412,7 +390,6 @@ I32TenMul(tensor_i32 A, tensor_i32 B)
         ++AccessDims[AccessDimIdx];
     }
 
-    if(ToFree.Header) Free(ToFree.Header);
     Free(AccessDims);
     return Result;
 }
@@ -420,15 +397,10 @@ I32TenMul(tensor_i32 A, tensor_i32 B)
 tensor_i32
 I32TenNeg(tensor_i32 A)
 {
-    tensor_i32 Result = {0};
+    tensor_i32 Result = _I32Tensor(A.Header->Sizes, A.Header->Dim, 0, 0, false);
 
-    if(!IS_GRAD_PRESERVE())
-    {
-        if (A.Header->IsLeaf)
-            Result = I32TensorCreateTempOrPerm(A.Header->Sizes, A.Header->Dim, 0, 0, false);
-        else Result = A;
-    }
-    else Result = I32TensorCreateTempOrPerm(A.Header->Sizes, A.Header->Dim, 0, 0, false);
+    // NOTE(Abid): We should not compute the grad in the backward case.
+    if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
 
     tensor_header *TenHeader = A.Header;
     int32 *AccessDims = (int32 *)Calloc(TenHeader->Dim, sizeof(int32));
