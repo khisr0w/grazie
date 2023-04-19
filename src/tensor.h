@@ -31,10 +31,10 @@ typedef struct
 
 typedef struct
 {
-    int32 *Sizes;
-    int32 *Strides;
-    int32 Dim;
-    int32 Offset;
+    uint32 *Sizes;
+    uint32 *Strides;
+    uint32 Dim;
+    uint32 Offset;
 
     // boolean IsPersist;
     boolean ShouldGrad;

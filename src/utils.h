@@ -21,7 +21,7 @@
 #define Terabyte(Value) (Gigabyte(Value)*1024LL)
 
 // NOTE(Abid): typedef and static define for ease of use
-typedef uint32_t unint32;
+typedef uint32_t uint32;
 typedef int32_t int32;
 typedef uintptr_t uintptr;
 typedef float float32;
@@ -42,7 +42,7 @@ boolean __GetSetGradState(boolean Set, boolean NewState)
 {
     local_persist boolean ShouldGrad = true;
 
-    if (Set) ShouldGrad = NewState;
+    if(Set) ShouldGrad = NewState;
 
     return ShouldGrad;
 }
