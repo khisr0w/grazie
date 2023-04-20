@@ -318,7 +318,9 @@ _OpsIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_header 
     return IsOuterDim;
 }
 
-tensor_i32
+// TODO(Abid): Recheck all of this (multiplication and subtraction as well), because they assume here that the stride
+//             of both tensors are the same (with GetValueMemOffset func), which is not true.
+internal tensor_i32
 I32TenAdd(tensor_i32 A, tensor_i32 B)
 {
     Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for + operation");
@@ -354,7 +356,7 @@ I32TenAdd(tensor_i32 A, tensor_i32 B)
     return Result;
 }
 
-tensor_i32
+internal tensor_i32
 I32TenMul(tensor_i32 A, tensor_i32 B)
 {
     Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for * operation");
@@ -394,7 +396,135 @@ I32TenMul(tensor_i32 A, tensor_i32 B)
     return Result;
 }
 
-tensor_i32
+internal tensor_i32
+I32TenTranspose(tensor_i32 A, int32 Dim1, int32 Dim2)
+{
+    Dim1 = (A.Header->Dim + Dim1) % A.Header->Dim;
+    Dim2 = (A.Header->Dim + Dim2) % A.Header->Dim;
+
+    Assert(Dim1 != Dim2, "incorrect dimensions for transpose; select two different dimensions");
+    Assert(((int32)A.Header->Dim >= Dim1) && ((int32)A.Header->Dim >= Dim2),
+           "dimension index out of bounds");
+
+    uint32 *NewSizes = (uint32 *)Malloc(2*A.Header->Dim*sizeof(uint32));
+    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
+    uint32 *NewStrides = NewSizes + A.Header->Dim;
+    memcpy(NewStrides, A.Header->Strides, A.Header->Dim*sizeof(uint32));
+
+
+    // NOTE(Abid): Swamp the sizes and strides
+    NewSizes[Dim1] = A.Header->Sizes[Dim2];
+    NewSizes[Dim2] = A.Header->Sizes[Dim1];
+
+    NewStrides[Dim1] = A.Header->Strides[Dim2];
+    NewStrides[Dim2] = A.Header->Strides[Dim1];
+
+    tensor_i32 ResultTen = _I32Tensor(NewSizes, A.Header->Dim, 0, 0, false);
+
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
+    int32 AccessDimIdx = 0;
+
+    while(AccessDimIdx >= 0)
+    {
+        // NOTE(Abid): Check if we are in outer dim and then update
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
+        {
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == NewSizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
+        }
+        else
+        {
+            uint32 ATenOuterDimOffset = 0;
+            uint32 ResultOuterDimOffset = 0;
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * NewStrides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * ResultTen.Header->Strides[Idx];
+            }
+            for(uint32 Idx = 0; Idx < NewSizes[AccessDimIdx]; ++Idx)
+            {
+                ResultTen.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset];
+                ATenOuterDimOffset += NewStrides[AccessDimIdx];
+                ResultOuterDimOffset += ResultTen.Header->Strides[AccessDimIdx];
+            }
+
+            AccessDims[AccessDimIdx--] = 0;
+            ++AccessDims[AccessDimIdx];
+        }
+    }
+
+    Free(NewSizes);
+    Free(AccessDims);
+    return ResultTen;
+}
+
+internal tensor_i32
+I32TenTransposeAll(tensor_i32 A)
+{
+    uint32 *NewSizes = (uint32 *)Malloc(2*A.Header->Dim*sizeof(uint32));
+    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
+    uint32 *NewStrides = NewSizes + A.Header->Dim;
+    memcpy(NewStrides, A.Header->Strides, A.Header->Dim*sizeof(uint32));
+
+    // NOTE(Abid): Swamp the sizes and strides
+    for(uint32 Idx = 0; Idx < A.Header->Dim; ++Idx)
+    {
+        NewSizes[Idx] = A.Header->Sizes[A.Header->Dim-Idx-1];
+        NewStrides[Idx] = A.Header->Strides[A.Header->Dim-Idx-1];
+    }
+
+    tensor_i32 ResultTen = _I32Tensor(NewSizes, A.Header->Dim, 0, 0, false);
+
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
+    int32 AccessDimIdx = 0;
+
+    while(AccessDimIdx >= 0)
+    {
+        // NOTE(Abid): Check if we are in outer dim and then update
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
+        {
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == NewSizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
+        }
+        else
+        {
+            uint32 ATenOuterDimOffset = 0;
+            uint32 ResultOuterDimOffset = 0;
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * NewStrides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * ResultTen.Header->Strides[Idx];
+            }
+            for(uint32 Idx = 0; Idx < NewSizes[AccessDimIdx]; ++Idx)
+            {
+                ResultTen.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset];
+                ATenOuterDimOffset += NewStrides[AccessDimIdx];
+                ResultOuterDimOffset += ResultTen.Header->Strides[AccessDimIdx];
+            }
+
+            AccessDims[AccessDimIdx--] = 0;
+            ++AccessDims[AccessDimIdx];
+        }
+    }
+
+    Free(NewSizes);
+    Free(AccessDims);
+    return ResultTen;
+}
+
+internal tensor_i32
 I32TenMatMul(tensor_i32 A, tensor_i32 B)
 {
     Assert(A.Header->Dim == B.Header->Dim, "dimension mismatch for MatMul operation");
@@ -499,7 +629,7 @@ I32TenMatMul(tensor_i32 A, tensor_i32 B)
     return ResultTen;
 }
 
-tensor_i32
+internal tensor_i32
 I32TenNeg(tensor_i32 A)
 {
     tensor_i32 Result = _I32Tensor(A.Header->Sizes, A.Header->Dim, 0, 0, false);

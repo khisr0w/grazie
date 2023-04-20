@@ -98,3 +98,39 @@ endif
 clean:
 	@rm -rf $(BIN_DIR)/*
 	@echo Cleaned!
+
+# =======================| Test script |========================
+
+TEST_BIN_DIR := $(BIN_DIR)/tests
+TEST_SRC_DIR := tests
+TEST_SRC := $(wildcard $(TEST_SRC_DIR)/*.c)
+TEST_OBJ := $(patsubst $(TEST_SRC_DIR)/%.c, $(TEST_BIN_DIR)/%.o, $(TEST_SRC))
+
+TEST_EXE := $(patsubst $(TEST_BIN_DIR)/%.o, $(TEST_BIN_DIR)/%, $(TEST_OBJ))
+
+ifeq ($(OS),Windows_NT)
+TEST_EXE := $(patsubst $(TEST_BIN_DIR)/%.o, $(TEST_BIN_DIR)/%.exe, $(TEST_OBJ))
+endif
+
+test: $(TEST_BIN_DIR) $(TEST_EXE)
+
+$(TEST_BIN_DIR):
+	@echo Starting test...
+	@mkdir -p $@
+
+$(TEST_EXE): $(TEST_OBJ)
+ifeq ($(OS),Windows_NT)
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) /Fe$@ $^
+else
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) $^ -o $@
+endif
+
+$(TEST_OBJ): $(TEST_SRC)
+ifeq ($(OS),Windows_NT)
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) /Fo$@ /c $<
+else
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) -c $< -o $@ 
+endif
+
+# =============================================================
+
