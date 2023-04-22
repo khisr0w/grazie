@@ -9,25 +9,32 @@
 
 typedef enum
 {
-    ops_None,
+    op_None,
 
-    ops_UnaryNegate,
-    ops_UnaryBroadcast,
+    op_UnaryNegate,
+    op_UnaryBroadcast,
+    op_UnaryTranpose,
+    op_UnaryTranposeAll,
 
     // NOTE(Abid): Element wise ops
-    ops_BinaryAdd,
-    ops_BinaryMult,
-    ops_BinarySub,
+    op_BinaryAdd,
+    op_BinarySub,
+    op_BinaryMult,
+    op_BinaryDiv,
 
-    ops_BinaryMatmul
+    op_BinaryMatmul,
+
 } tensor_op;
 
 typedef struct
 {
-    tensor_op TenOp;
+    tensor_op TensorOp;
+    void *Operands;
 
-    void **Parents;
-} operands;
+    // NOTE(Abid): This is used for storing context data related to operations,
+    //             One of the main uses is to store the dimensions that transposed.
+    void *OpContext;
+} op_info;
 
 typedef struct
 {
@@ -39,7 +46,7 @@ typedef struct
     // boolean IsPersist;
     boolean ShouldGrad;
 
-    operands Parents;
+    op_info DerivedOp;
 } tensor_header;
 
 typedef struct

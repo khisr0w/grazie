@@ -18,6 +18,7 @@
 #include "utils.h"
 #include "memory.c"
 #include "tensor.c"
+#include "autograd.c"
 
 #define GRAZIE_H
 #endif

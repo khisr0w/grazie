@@ -8,7 +8,7 @@
 
 #if !defined(UTILS_H)
 
-#define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", __FILE__, __LINE__); *(int *)0 = 0;}
+#define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", __FILE__, __LINE__); exit(-1);}
 #define InvalidCodePath() *(int *)0 = 0
 
 

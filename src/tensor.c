@@ -7,6 +7,12 @@
     +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
 
 /*
+   TODO(Abid):
+
+   - Convert all the code for operations (except for tensor creation) to work for both
+     int32 and float32 tensors.
+
+
    NOTE(Abid): Here how the memory mapping is supposedly going to work for tensors.
 
    - If `no_grad` is turned on, we will go through the same math operation as if its off;
@@ -108,6 +114,9 @@ _I32Tensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLength, bo
     // Result.Header->IsPersist = false;
     // NOTE(Abid): Setting whether to compute the backward pass or not
     Result.Header->ShouldGrad = IS_GRAD_PRESERVE() ? true : false;
+    Result.Header->DerivedOp.TensorOp = op_None;
+    Result.Header->DerivedOp.OpContext = NULL;
+
     Result.Storage = (int32 *)(Result.Header->Strides + ShapeLength);
     
     // NOTE(Abid): Setting Default Values
@@ -144,23 +153,6 @@ GetStorageSize(int32 *Sizes, int32 Dim)
         Assert(Sizes[Idx], "tensor shape cannot be zero")
         Result *= Sizes[Idx];
     }
-
-    return Result;
-}
-
-internal inline size_t
-GetValueMemOffset(tensor_header *Header, uint32 *AccessShape, boolean IsSparseTensor)
-{
-    // TODO(Abid): Change this, Assert here assumes our AccessShape starts from 1 which is not true
-#if 0 
-    if(!IsSparseTensor) Assert(GetStorageSize(Header->Sizes, Header->Dim) ==
-                               GetStorageSize(AccessShape, Header->Dim), "shape out of bound of storage");
-#else
-    if(!IsSparseTensor) IsSparseTensor = false;
-#endif
-
-    size_t Result = 0;
-    for (uint32 Idx = 0; Idx < Header->Dim; ++Idx) Result += AccessShape[Idx] * Header->Strides[Idx];
 
     return Result;
 }
@@ -238,7 +230,9 @@ PrintF32Tensor(tensor_f32 Tensor)
         for (uint32 Idx = 0; Idx < TenHeader->Sizes[AccessDimIdx]; ++Idx)
         {
             AccessDims[AccessDimIdx] = Idx;
-            size_t Pos = GetValueMemOffset(TenHeader, AccessDims, false);
+            size_t Pos = 0;
+            for (uint32 PosIdx = 0; PosIdx < Tensor.Header->Dim; ++PosIdx) Pos += AccessDims[PosIdx] * Tensor.Header->Strides[PosIdx];
+
             float32 Value = Tensor.Storage[Pos];
             printf("%.3f", Value); ++PrintCount;
             if(AccessDims[AccessDimIdx] < (TenHeader->Sizes[AccessDimIdx]-1)) { printf(", "); ++PrintCount; }
@@ -278,7 +272,10 @@ PrintI32Tensor(tensor_i32 Tensor)
         for (uint32 Idx = 0; Idx < TenHeader->Sizes[AccessDimIdx]; ++Idx)
         {
             AccessDims[AccessDimIdx] = Idx;
-            size_t Pos = GetValueMemOffset(TenHeader, AccessDims, false);
+
+            size_t Pos = 0;
+            for (uint32 PosIdx = 0; PosIdx < Tensor.Header->Dim; ++PosIdx) Pos += AccessDims[PosIdx] * Tensor.Header->Strides[PosIdx];
+
             int32 Value = Tensor.Storage[Pos];
             printf("%d", Value); ++PrintCount;
             if(AccessDims[AccessDimIdx] < (TenHeader->Sizes[AccessDimIdx]-1)) { printf(", "); ++PrintCount; }
@@ -295,31 +292,10 @@ PrintI32Tensor(tensor_i32 Tensor)
     Free(AccessDims);
 }
 
-
 // =======================================
 // NOTE(Abid): Math Operations tensor_i32
 // =======================================
 
-internal inline boolean
-_OpsIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_header *TenHeader)
-{
-    boolean IsOuterDim = *AccessDimIdx != (int32)(TenHeader->Dim-1);
-    if (IsOuterDim)
-    {
-        // NOTE(Abid): In case we have reached the end of this dimension
-        if (AccessDims[*AccessDimIdx] == TenHeader->Sizes[*AccessDimIdx])
-        {
-            AccessDims[(*AccessDimIdx)--] = 0;
-            if(*AccessDimIdx == -1) return IsOuterDim;
-            ++AccessDims[*AccessDimIdx];
-        }
-        else ++(*AccessDimIdx);
-    }
-    return IsOuterDim;
-}
-
-// TODO(Abid): Recheck all of this (multiplication and subtraction as well), because they assume here that the stride
-//             of both tensors are the same (with GetValueMemOffset func), which is not true.
 internal tensor_i32
 I32TenAdd(tensor_i32 A, tensor_i32 B)
 {
@@ -329,27 +305,124 @@ I32TenAdd(tensor_i32 A, tensor_i32 B)
     // NOTE(Abid): We should not compute the grad in the backward case.
     if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
 
-    tensor_header *TenHeader = A.Header;
-    uint32 *AccessDims = (uint32 *)Calloc(TenHeader->Dim, sizeof(uint32));
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
     int32 AccessDimIdx = 0;
 
     while(AccessDimIdx >= 0)
     {
-        if (_OpsIsOuterAndUpdateDims(&AccessDimIdx, AccessDims, TenHeader)) continue;
-
-        for (uint32 Idx = 0; Idx < TenHeader->Sizes[AccessDimIdx]; ++Idx)
+        // NOTE(Abid): Check if we are in outer dim and then update
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
         {
-            AccessDims[AccessDimIdx] = Idx;
-            size_t Pos = GetValueMemOffset(TenHeader, AccessDims, false);
-            int32 AVal = A.Storage[Pos];
-            int32 BVal = B.Storage[Pos];
-            Result.Storage[Pos] = AVal+BVal;
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
         }
+        else
+        {
+            size_t ATenOuterDimOffset = 0;
+            size_t BTenOuterDimOffset = 0;
+            size_t ResultOuterDimOffset = 0;
 
-        // NOTE(Abid): Go to the previous dimension while setting this one to zero
-        AccessDims[AccessDimIdx--] = 0;
-        ++AccessDims[AccessDimIdx];
+            // NOTE(Abid): Offset until the start of the inner dimension
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx];
+                BTenOuterDimOffset += AccessDims[Idx] * B.Header->Strides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * Result.Header->Strides[Idx];
+            }
+            for (uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx)
+            {
+                Result.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset] + B.Storage[BTenOuterDimOffset];
+
+                ATenOuterDimOffset += A.Header->Strides[AccessDimIdx];
+                BTenOuterDimOffset += B.Header->Strides[AccessDimIdx];
+                ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx];
+            }
+
+            // NOTE(Abid): Go to the previous dimension while setting this one to zero
+            AccessDims[AccessDimIdx--] = 0;
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+        }
     }
+
+    // NOTE(Abid): Add information for backpropagation
+    Result.Header->DerivedOp.TensorOp = op_BinaryAdd;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32)*2);
+    Operands[0] = A;
+    Operands[1] = B;
+    Result.Header->DerivedOp.Operands = Operands;
+
+    // NOTE(Abid): Free the superfluous allocations
+    Free(AccessDims);
+    return Result;
+}
+
+internal tensor_i32
+I32TenSub(tensor_i32 A, tensor_i32 B)
+{
+    Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for - operation");
+    tensor_i32 Result = _I32Tensor(A.Header->Sizes, B.Header->Dim, 0, 0, false);
+
+    // NOTE(Abid): We should not compute the grad in the backward case.
+    if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
+
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
+    int32 AccessDimIdx = 0;
+
+    while(AccessDimIdx >= 0)
+    {
+        // NOTE(Abid): Check if we are in outer dim and then update
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
+        {
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
+        }
+        else
+        {
+            size_t ATenOuterDimOffset = 0;
+            size_t BTenOuterDimOffset = 0;
+            size_t ResultOuterDimOffset = 0;
+
+            // NOTE(Abid): Offset until the start of the inner dimension
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx];
+                BTenOuterDimOffset += AccessDims[Idx] * B.Header->Strides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * Result.Header->Strides[Idx];
+            }
+            for (uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx)
+            {
+                Result.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset] -
+                                                       B.Storage[BTenOuterDimOffset];
+
+                ATenOuterDimOffset += A.Header->Strides[AccessDimIdx];
+                BTenOuterDimOffset += B.Header->Strides[AccessDimIdx];
+                ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx];
+            }
+
+            // NOTE(Abid): Go to the previous dimension while setting this one to zero
+            AccessDims[AccessDimIdx--] = 0;
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+        }
+    }
+
+    // NOTE(Abid): Add information for backpropagation
+    Result.Header->DerivedOp.TensorOp = op_BinarySub;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32)*2);
+    Operands[0] = A;
+    Operands[1] = B;
+    Result.Header->DerivedOp.Operands = Operands;
 
     // NOTE(Abid): Free the superfluous allocations
     Free(AccessDims);
@@ -365,36 +438,131 @@ I32TenMul(tensor_i32 A, tensor_i32 B)
     // NOTE(Abid): We should not compute the grad in the backward case.
     if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
 
-    tensor_header *TenHeader = A.Header;
-    uint32 *AccessDims = (uint32 *)Calloc(TenHeader->Dim, sizeof(uint32));
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
     int32 AccessDimIdx = 0;
 
     while(AccessDimIdx >= 0)
     {
-        // NOTE(Abid): Checks if we are in outer dim and then updates
-        if(_OpsIsOuterAndUpdateDims(&AccessDimIdx, AccessDims, TenHeader)) continue;
-        for(uint32 Idx = 0; Idx < TenHeader->Sizes[AccessDimIdx]; ++Idx)
+        // NOTE(Abid): Check if we are in outer dim and then update
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
         {
-            AccessDims[AccessDimIdx] = Idx;
-            size_t Pos = GetValueMemOffset(TenHeader, AccessDims, false);
-            int32 AVal = A.Storage[Pos];
-            int32 BVal = B.Storage[Pos];
-            Result.Storage[Pos] = AVal*BVal;
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
         }
+        else
+        {
+            size_t ATenOuterDimOffset = 0;
+            size_t BTenOuterDimOffset = 0;
+            size_t ResultOuterDimOffset = 0;
 
-        // NOTE(Abid): Go to the previous dimension while setting this one to zero
-        AccessDims[AccessDimIdx--] = 0;
-        if(AccessDimIdx < 0)
-        {
-            int Val = 2;
-            Val = 2;
+            // NOTE(Abid): Offset until the start of the inner dimension
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx];
+                BTenOuterDimOffset += AccessDims[Idx] * B.Header->Strides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * Result.Header->Strides[Idx];
+            }
+            for (uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx)
+            {
+                Result.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset] *
+                                                       B.Storage[BTenOuterDimOffset];
+
+                ATenOuterDimOffset += A.Header->Strides[AccessDimIdx];
+                BTenOuterDimOffset += B.Header->Strides[AccessDimIdx];
+                ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx];
+            }
+
+            // NOTE(Abid): Go to the previous dimension while setting this one to zero
+            AccessDims[AccessDimIdx--] = 0;
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
         }
-        ++AccessDims[AccessDimIdx];
     }
 
+    // NOTE(Abid): Add information for backpropagation
+    Result.Header->DerivedOp.TensorOp = op_BinaryMult;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32)*2);
+    Operands[0] = A;
+    Operands[1] = B;
+    Result.Header->DerivedOp.Operands = Operands;
+
+    // NOTE(Abid): Free the superfluous allocations
     Free(AccessDims);
     return Result;
 }
+
+internal tensor_i32
+I32TenDiv(tensor_i32 A, tensor_i32 B)
+{
+    Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for division operation");
+    tensor_i32 Result = _I32Tensor(A.Header->Sizes, B.Header->Dim, 0, 0, false);
+
+    // NOTE(Abid): We should not compute the grad in the backward case.
+    if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
+
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
+    int32 AccessDimIdx = 0;
+
+    while(AccessDimIdx >= 0)
+    {
+        // NOTE(Abid): Check if we are in outer dim and then update
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
+        {
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
+        }
+        else
+        {
+            size_t ATenOuterDimOffset = 0;
+            size_t BTenOuterDimOffset = 0;
+            size_t ResultOuterDimOffset = 0;
+
+            // NOTE(Abid): Offset until the start of the inner dimension
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx];
+                BTenOuterDimOffset += AccessDims[Idx] * B.Header->Strides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * Result.Header->Strides[Idx];
+            }
+            for (uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx)
+            {
+                Result.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset] /
+                                                       B.Storage[BTenOuterDimOffset];
+
+                ATenOuterDimOffset += A.Header->Strides[AccessDimIdx];
+                BTenOuterDimOffset += B.Header->Strides[AccessDimIdx];
+                ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx];
+            }
+
+            // NOTE(Abid): Go to the previous dimension while setting this one to zero
+            AccessDims[AccessDimIdx--] = 0;
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+        }
+    }
+
+    // NOTE(Abid): Add information for backpropagation
+    Result.Header->DerivedOp.TensorOp = op_BinaryMult;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32)*2);
+    Operands[0] = A;
+    Operands[1] = B;
+    Result.Header->DerivedOp.Operands = Operands;
+
+    // NOTE(Abid): Free the superfluous allocations
+    Free(AccessDims);
+    return Result;
+}
+
 
 internal tensor_i32
 I32TenTranspose(tensor_i32 A, int32 Dim1, int32 Dim2)
@@ -455,9 +623,19 @@ I32TenTranspose(tensor_i32 A, int32 Dim1, int32 Dim2)
             }
 
             AccessDims[AccessDimIdx--] = 0;
-            ++AccessDims[AccessDimIdx];
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
         }
     }
+
+    // NOTE(Abid): Add information for backpropagation
+    ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranpose;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32) + sizeof(int32)*2);
+    Operands[0] = A;
+    int32 *TranposedDims = (int32 *)(Operands+1);
+    TranposedDims[0] = Dim1;
+    TranposedDims[1] = Dim2;
+    ResultTen.Header->DerivedOp.Operands = Operands;
+    ResultTen.Header->DerivedOp.OpContext = TranposedDims;
 
     Free(NewSizes);
     Free(AccessDims);
@@ -515,9 +693,16 @@ I32TenTransposeAll(tensor_i32 A)
             }
 
             AccessDims[AccessDimIdx--] = 0;
-            ++AccessDims[AccessDimIdx];
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
         }
     }
+
+
+    // NOTE(Abid): Add information for backpropagation
+    ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranposeAll;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32));
+    Operands[0] = A;
+    ResultTen.Header->DerivedOp.Operands = Operands;
 
     Free(NewSizes);
     Free(AccessDims);
@@ -620,9 +805,16 @@ I32TenMatMul(tensor_i32 A, tensor_i32 B)
 
             // NOTE(Abid): Go to the previous dimension while setting this one to zero
             AccessDims[AccessDimIdx--] = 0;
-            ++AccessDims[AccessDimIdx];
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
         }
     }
+
+    // NOTE(Abid): Add information for backpropagation
+    ResultTen.Header->DerivedOp.TensorOp = op_BinaryMatmul;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32)*2);
+    Operands[0] = A;
+    Operands[1] = B;
+    ResultTen.Header->DerivedOp.Operands = Operands;
 
     Free(NewSizes);
     Free(AccessDims);
@@ -637,26 +829,50 @@ I32TenNeg(tensor_i32 A)
     // NOTE(Abid): We should not compute the grad in the backward case.
     if(!IS_GRAD_PRESERVE()) Result.Header->ShouldGrad = false;
 
-    tensor_header *TenHeader = A.Header;
-    uint32 *AccessDims = (uint32 *)Calloc(TenHeader->Dim, sizeof(uint32));
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
     int32 AccessDimIdx = 0;
 
     while(AccessDimIdx >= 0)
     {
-        if(_OpsIsOuterAndUpdateDims(&AccessDimIdx, AccessDims, TenHeader)) continue;
-
-        for(uint32 Idx = 0; Idx < TenHeader->Sizes[AccessDimIdx]; ++Idx)
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1);
+        if(IsOuterDim)
         {
-            AccessDims[AccessDimIdx] = Idx;
-            size_t Pos = GetValueMemOffset(TenHeader, AccessDims, false);
-            int32 AVal = A.Storage[Pos];
-            Result.Storage[Pos] = -1*AVal;
+            // NOTE(Abid): In case we have reached the end of this dimension
+            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx])
+            {
+                AccessDims[AccessDimIdx--] = 0;
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+            }
+            else ++AccessDimIdx;
         }
+        else
+        {
+            size_t ATenOuterDimOffset = 0;
+            size_t ResultOuterDimOffset = 0;
 
-        // NOTE(Abid): Go to the previous dimension while setting this one to zero
-        AccessDims[AccessDimIdx--] = 0;
-        ++AccessDims[AccessDimIdx];
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx)
+            {
+                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx];
+                ResultOuterDimOffset += AccessDims[Idx] * Result.Header->Strides[Idx];
+            }
+
+            for(uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx)
+            {
+                Result.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset]*-1;
+
+                ATenOuterDimOffset += A.Header->Strides[AccessDimIdx];
+                ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx];
+            }
+            // NOTE(Abid): Go to the previous dimension while setting this one to zero
+            AccessDims[AccessDimIdx--] = 0;
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+        }
     }
+
+    Result.Header->DerivedOp.TensorOp = op_UnaryNegate;
+    tensor_i32 *Operands = (tensor_i32 *)Malloc(sizeof(tensor_i32));
+    Operands[0] = A;
+    Result.Header->DerivedOp.Operands = Operands;
 
     Free(AccessDims);
     return Result;

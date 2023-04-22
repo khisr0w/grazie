@@ -8,23 +8,26 @@
       EDIT: An optimization issue could arise if we are allocating new memory inside
             an operation. e.g. we are currently allocating memory for `AccessDims`,
             which I would like to get rid of. Maybe, some small bits of memory should
-            be allocated beforehand so that we don't have to do this; somethign akin
+            be allocated beforehand so that we don't have to do this; something akin
             to an `operational memory`.
       EDIT: One idea could be to have buckets of memory that would be required for
             some operations, maybe buckets of 32 bytes, 64 bytes, ... and since the
             usage is temporary, we don't have to worry about memory fragmentation.
             If the program fills the memory to a certain point, we can allocate more.
 
-    - Assign operands to each tensor who goes through a tensor operation, along with the op type.
+    - Assign operands to each tensor that goes through a tensor operation, along with the op type.
       - Check that after operations, the only the oldest non-leaf tensor gets overwritten.
     - Better (effecient) implementation of the tensor operations, maybe start with the the MatMul
     - Make the tensor struct more generic so we can have float and int at the same time.
 
-    - Math Ops:
-      - Implement transpose
-      - ...
+    - TODO(Abid): Math Ops
+                  - View
+                  - Convolution
 
     DODO:
+    - Storing operations history for autograd
+    - MatMul implemented
+    - Transpose implemented
     - Change the structure of the tensor so that they are pointers, avoid copying them around
     - How to resolve the issue of freeing the memory of intermediate results, in case we call 'No grad' on them.
 
@@ -34,46 +37,30 @@
 
 int main()
 {
+    uint32 Shape1[] = {2, 3};
+    int32 Value1[] = {-2, 1, 5,
+                      12, 55, 3};
+    tensor_i32 Ten1 = I32Tensor(Shape1, Value1);
 
-    uint32 Shape[] = {2, 3, 4, 5};
-    int32 Value[] = {1, 2, 3, 4, 5,
-                     6, 7, 8, 9, 10,
-                    11, 12, 13, 14, 15,
-                    16, 17, 18, 19, 20,
+    tensor_i32 Result = I32TenNeg(Ten1);
+#if 0
+    uint32 Shape2[] = {2, 3};
+    int32 Value2[] = {-1, 4, 8,
+                      2, 7, 9};
+    tensor_i32 Ten2 = I32Tensor(Shape2, Value2);
 
-                    21, 22, 23, 24, 25,
-                    26, 27, 28, 29, 30,
-                    31, 32, 33, 34, 35,
-                    36, 37, 38, 39, 40,
+    tensor_i32 Result = I32TenMatMul(Ten1, I32TenTransposeAll(Ten2));
+    printf("First Operand\n");
+    PrintI32Tensor(((tensor_i32 *)Result.Header->DerivedOp.Operands)[0]);
 
-                    41, 42, 43, 44, 45,
-                    46, 47, 48, 49, 50,
-                    51, 52, 53, 54, 55,
-                    56, 57, 58, 59, 60,
+    printf("Second Operand\n");
+    PrintI32Tensor(((tensor_i32 *)Result.Header->DerivedOp.Operands)[1]);
 
-                    61, 62, 63, 64, 65,
-                    66, 67, 68, 69, 70,
-                    71, 72, 73, 74, 75,
-                    76, 77, 78, 79, 80,
+    printf("Transpose Operand of the Second Operand\n");
+    PrintI32Tensor(((tensor_i32 *)(((tensor_i32 *)Result.Header->DerivedOp.Operands)[1]).Header->DerivedOp.Operands)[0]);
+#endif
 
-                    81, 82, 83, 84, 85,
-                    86, 87, 88, 89, 90,
-                    91, 92, 93, 94, 95,
-                    96, 97, 98, 99, 100,
-
-                    101, 102, 103, 104, 105,
-                    106, 107, 108, 109, 110,
-                    111, 112, 113, 114, 115,
-                    116, 117, 118, 119, 120};
-    
-
-    tensor_i32 Ten1 = I32Tensor(Shape, Value);
-    PrintI32Tensor(Ten1);
-
-    tensor_i32 Ten2 = I32TenTranspose(Ten1, 0, -1);
-    PrintI32Tensor(Ten2);
-    tensor_i32 Ten3 = I32TenTransposeAll(Ten1);
-    PrintI32Tensor(Ten3);
+    PrintI32Tensor(Result);
 
     return 0;
 }
