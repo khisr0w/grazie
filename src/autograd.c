@@ -7,9 +7,12 @@
     +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
 
 internal void
-Backward(tensor_i32 A)
+Backward(tensor32 A)
 {
-    tensor_op Operation = A.Header->DerivedOp.TensorOp;
+    tensor32 Ten = A;
+    // tensor32 *FirstOperand = (tensor32 *)(Ten.Header->DerivedOp.Operands);
+    // tensor32 *SecondOperand = FirstOperand+1;
+    tensor_op Operation = Ten.Header->DerivedOp.TensorOp;
 
     while(Operation != op_None)
     {
@@ -34,7 +37,7 @@ Backward(tensor_i32 A)
             case op_BinarySub:
             {
             } break;
-            case op_BinaryMult:
+            case op_BinaryMul:
             {
             } break;
             case op_BinaryDiv:
@@ -44,7 +47,6 @@ Backward(tensor_i32 A)
             {
             } break;
             default: Assert(0, "invalid code path");
-
         }
     }
 }

@@ -19,12 +19,18 @@ typedef enum
     // NOTE(Abid): Element wise ops
     op_BinaryAdd,
     op_BinarySub,
-    op_BinaryMult,
+    op_BinaryMul,
     op_BinaryDiv,
 
     op_BinaryMatmul,
 
 } tensor_op;
+
+typedef enum
+{
+    dtype_int32 = 1,
+    dtype_float32 = 2,
+} tensor_dtype;
 
 typedef struct
 {
@@ -42,9 +48,11 @@ typedef struct
     uint32 *Strides;
     uint32 Dim;
     uint32 Offset;
+    float32 Grad;
 
     // boolean IsPersist;
     boolean ShouldGrad;
+    tensor_dtype DType;
 
     op_info DerivedOp;
 } tensor_header;
@@ -53,8 +61,8 @@ typedef struct
 {
     tensor_header *Header;
 
-    int32 *Storage;
-} tensor_i32;
+    void *Storage;
+} tensor32;
 
 typedef struct
 {

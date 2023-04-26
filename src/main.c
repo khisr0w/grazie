@@ -19,18 +19,6 @@
       - Check that after operations, the only the oldest non-leaf tensor gets overwritten.
     - Better (effecient) implementation of the tensor operations, maybe start with the the MatMul
     - Make the tensor struct more generic so we can have float and int at the same time.
-
-    - TODO(Abid): Math Ops
-                  - View
-                  - Convolution
-
-    DODO:
-    - Storing operations history for autograd
-    - MatMul implemented
-    - Transpose implemented
-    - Change the structure of the tensor so that they are pointers, avoid copying them around
-    - How to resolve the issue of freeing the memory of intermediate results, in case we call 'No grad' on them.
-
 */
 
 #include "grazie.h"
@@ -38,15 +26,18 @@
 int main()
 {
     uint32 Shape1[] = {2, 3};
-    int32 Value1[] = {-2, 1, 5,
-                      12, 55, 3};
-    tensor_i32 Ten1 = I32Tensor(Shape1, Value1);
-
-    tensor_i32 Result = I32TenNeg(Ten1);
 #if 0
-    uint32 Shape2[] = {2, 3};
+    float32 Value1[] = {-2.4f, 1.43f, 5.8f,
+                        12.14f, 5.5f, 3.2f};
+    tensor32 Ten1 = F32Tensor(Shape1, Value1);
+#endif
+
     int32 Value2[] = {-1, 4, 8,
                       2, 7, 9};
+    tensor32 Ten2 = I32Tensor(Shape1, Value2);
+
+    tensor32 Result = T32Div(Ten2, Ten2);
+#if 0
     tensor_i32 Ten2 = I32Tensor(Shape2, Value2);
 
     tensor_i32 Result = I32TenMatMul(Ten1, I32TenTransposeAll(Ten2));
@@ -60,7 +51,7 @@ int main()
     PrintI32Tensor(((tensor_i32 *)(((tensor_i32 *)Result.Header->DerivedOp.Operands)[1]).Header->DerivedOp.Operands)[0]);
 #endif
 
-    PrintI32Tensor(Result);
+    PrintTensor32(Result);
 
     return 0;
 }
