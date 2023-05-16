@@ -26,17 +26,22 @@
 int main()
 {
     uint32 Shape1[] = {2, 3};
-#if 0
+
     float32 Value1[] = {-2.4f, 1.43f, 5.8f,
                         12.14f, 5.5f, 3.2f};
     tensor32 Ten1 = F32Tensor(Shape1, Value1);
-#endif
 
     int32 Value2[] = {-1, 4, 8,
-                      2, 7, 9};
+                       2, 7, 9};
     tensor32 Ten2 = I32Tensor(Shape1, Value2);
 
-    tensor32 Result = T32Div(Ten2, Ten2);
+    tensor32 ResultAdd = _I32Tensor(Shape1, ArrayLength(Shape1), 0, 0, false);
+
+    tensor32 ResultTranpose = _F32Tensor(Shape1, ArrayLength(Shape1), 0, 0, false);
+
+    ResultAdd = T32Add(Ten1, Ten2, ResultAdd);
+    ResultTranpose = T32TransposeAll(ResultAdd, ResultTranpose);
+
 #if 0
     tensor_i32 Ten2 = I32Tensor(Shape2, Value2);
 
@@ -51,7 +56,7 @@ int main()
     PrintI32Tensor(((tensor_i32 *)(((tensor_i32 *)Result.Header->DerivedOp.Operands)[1]).Header->DerivedOp.Operands)[0]);
 #endif
 
-    PrintTensor32(Result);
+    PrintTensor32(ResultTranpose);
 
     return 0;
 }
