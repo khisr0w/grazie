@@ -52,14 +52,14 @@
 #define _ALLOC_TENSOR_DTYPE(TYPE, DTYPE) \
     tensor32 Result = {0}; \
     \
-    size_t StorageSize = 1; \
-    for (uint32 i = 0; i < ShapeLength; ++i) { StorageSize *= Shape[i]; } \
-    Assert(StorageSize != 0, "Wrong shape given, cannot be zero"); \
+    size_t DataSize = 1; \
+    for (uint32 i = 0; i < ShapeLength; ++i) { DataSize *= Shape[i]; } \
+    Assert(DataSize != 0, "Wrong shape given, cannot be zero"); \
     \
     size_t FinalSize = sizeof(tensor_header) + \
-                       2*ShapeLength*sizeof(uint32) + /* NOTE(Abid): Stride and Shape */ \
+                       2*ShapeLength*sizeof(uint32) + /* NOTE(Abid): For Stride and Shape */ \
                        2*sizeof(tensor32) + /* NOTE(Abid): For tensor operands */ \
-                       StorageSize*sizeof(TYPE); \
+                       2*DataSize*sizeof(TYPE); /* NOTE(Abid): For Data and Grad */\
     \
     /* NOTE(Abid): Memory mapping */ \
     Result.Header = (tensor_header *)Malloc(FinalSize); \
@@ -67,14 +67,15 @@
     Result.Header->Sizes = (uint32 *)(Result.Header+1); \
     Result.Header->Strides = (uint32 *)(Result.Header->Sizes + ShapeLength); \
     Result.Header->DType = DTYPE; \
-    /* Result.Header->IsPersist = false; */ \
     /* NOTE(Abid): Setting whether to compute the backward pass or not */ \
     Result.Header->ShouldGrad = IS_GRAD_PRESERVE() ? true : false; \
     Result.Header->DerivedOp.TensorOp = op_None; \
     Result.Header->DerivedOp.OpContext = NULL; \
     \
     Result.Header->DerivedOp.Operands = (tensor32 *)(Result.Header->Strides + ShapeLength); \
-    Result.Storage = (void *)((tensor32 *)Result.Header->DerivedOp.Operands + 2); /* NOTE(Abid): 2 operands by default */ \
+    Result.Data = (void *)((tensor32 *)Result.Header->DerivedOp.Operands + 2); /* NOTE(Abid): 2 operands by default */ \
+    Result.Grad = ((TYPE *)Result.Data) + DataSize; \
+    memset(Result.Grad, 0, DataSize*sizeof(TYPE)); \
     \
     /* NOTE(Abid): Setting Default Values */ \
     Result.Header->Offset = 0; \
@@ -93,22 +94,34 @@
     if(Intialize) \
     { \
         /* NOTE(Abid): Check if the DataLength makes sense with the shape */ \
-        Assert(DataLength == StorageSize, "Mismatch of data and tensor shape"); \
-        memcpy(Result.Storage, Data, StorageSize*sizeof(TYPE)); \
+        Assert(DataLength == DataSize, "Mismatch of data and tensor shape"); \
+        memcpy(Result.Data, Data, DataSize*sizeof(TYPE)); \
     } \
     \
     return Result; \
 
-#define F32Tensor(Shape, Data) _F32Tensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
+#define F32Tensor(Shape, Data) _float32AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
 internal inline tensor32
-_F32Tensor(uint32 *Shape, uint32 ShapeLength, float32 *Data, size_t DataLength, boolean Intialize)
+_float32AllocTensor(uint32 *Shape, uint32 ShapeLength, float32 *Data, size_t DataLength, boolean Intialize)
 { _ALLOC_TENSOR_DTYPE(float32, dtype_float32); }
 
 
-#define I32Tensor(Shape, Data) _I32Tensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
+#define I32Tensor(Shape, Data) _int32AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
 internal inline tensor32
-_I32Tensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLength, boolean Intialize)
+_int32AllocTensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLength, boolean Intialize)
 { _ALLOC_TENSOR_DTYPE(int32, dtype_int32); }
+
+#define SHAPE(...) __VA_ARGS__
+#define ARRAY(...) __VA_ARGS__
+#define TensorFromArrayLiteral(Name, DTYPE, Shape, Values) \
+    tensor32 Name = {0}; \
+    do \
+    { \
+        uint32 Shape_Arr[] = { Shape }; \
+        DTYPE Values_Arr[] = { Values }; \
+        Name = _##DTYPE##AllocTensor(Shape_Arr, ArrayLength(Shape_Arr), \
+                                     Values_Arr, ArrayLength(Values_Arr), true); \
+    } while(0);
 
 internal inline size_t
 GetStorageSize(uint32 *Sizes, uint32 Dim)
@@ -165,7 +178,7 @@ _PrintIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_heade
 //             the result of in-argument computations. Needs to be macro'ed out once memory
 //             module is written.
 
-#define _PRINT_DTYPE(TEN_NAME, TYPE, PRINT_FORMAT) \
+#define _PRINT_DTYPE(TEN_NAME, STORAGE, TYPE, PRINT_FORMAT) \
     printf(TEN_NAME); \
     printf(" -> shape ("); \
     for (uint32 i = 0; i < (TenHeader->Dim-1); ++i) { printf("%d,", TenHeader->Sizes[i]); } \
@@ -190,7 +203,7 @@ _PrintIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_heade
             size_t Pos = 0; \
             for (uint32 PosIdx = 0; PosIdx < Tensor.Header->Dim; ++PosIdx) Pos += AccessDims[PosIdx] * Tensor.Header->Strides[PosIdx]; \
             \
-            printf(PRINT_FORMAT, ((TYPE *)Tensor.Storage)[Pos]); \
+            printf(PRINT_FORMAT, ((TYPE *)Tensor.STORAGE)[Pos]); \
             ++PrintCount; \
             if(AccessDims[AccessDimIdx] < (TenHeader->Sizes[AccessDimIdx]-1)) { printf(", "); ++PrintCount; } \
         } \
@@ -207,7 +220,7 @@ _PrintIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_heade
     Free(AccessDims); \
 
 internal void
-PrintTensor32(tensor32 Tensor)
+PrintTensor32Data(tensor32 Tensor)
 {
     int32 MaxPrintWidth = 20;
     int32 PrintCount = 0;
@@ -218,8 +231,26 @@ PrintTensor32(tensor32 Tensor)
     tensor_dtype DType = TenHeader->DType;
     switch(DType)
     {
-        case dtype_int32: { _PRINT_DTYPE("tensor i32", int32, "%d"); } break;
-        case dtype_float32: { _PRINT_DTYPE("tensor f32", float, "%f"); } break;
+        case dtype_int32: { _PRINT_DTYPE("tensor i32", Data, int32, "%d"); } break;
+        case dtype_float32: { _PRINT_DTYPE("tensor f32", Data, float, "%f"); } break;
+        default: Assert(0, "invalid code path");
+    }
+}
+
+internal void
+PrintTensor32Grad(tensor32 Tensor)
+{
+    int32 MaxPrintWidth = 20;
+    int32 PrintCount = 0;
+
+    tensor_header *TenHeader = Tensor.Header;
+
+    // NOTE(Abid): Print the header and data
+    tensor_dtype DType = TenHeader->DType;
+    switch(DType)
+    {
+        case dtype_int32: { _PRINT_DTYPE("tensor i32", Grad, int32, "%d"); } break;
+        case dtype_float32: { _PRINT_DTYPE("tensor f32", Grad, float, "%f"); } break;
         default: Assert(0, "invalid code path");
     }
 }
@@ -228,6 +259,7 @@ PrintTensor32(tensor32 Tensor)
 // NOTE(Abid): Math Operations tensor_i32
 // =======================================
 
+// NOTE(Abid): Elementwise Operations
 #define _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, A_TYPE, B_TYPE, RES_TYPE) \
     Result.Header->ShouldGrad = !IS_GRAD_PRESERVE(); \
     uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32)); \
@@ -258,8 +290,8 @@ PrintTensor32(tensor32 Tensor)
             } \
             for (uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx) \
             { \
-                ((RES_TYPE *)Result.Storage)[ResultOuterDimOffset] = (RES_TYPE)(((A_TYPE *)A.Storage)[ATenOuterDimOffset] OPERATION \
-                                                                                ((B_TYPE *)B.Storage)[BTenOuterDimOffset]); \
+                ((RES_TYPE *)Result.Data)[ResultOuterDimOffset] = (RES_TYPE)(((A_TYPE *)A.Data)[ATenOuterDimOffset] OPERATION \
+                                                                                ((B_TYPE *)B.Data)[BTenOuterDimOffset]); \
                 ATenOuterDimOffset += A.Header->Strides[AccessDimIdx]; \
                 BTenOuterDimOffset += B.Header->Strides[AccessDimIdx]; \
                 ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx]; \
@@ -274,13 +306,13 @@ PrintTensor32(tensor32 Tensor)
     Operands[0] = A; \
     Operands[1] = B; \
     \
-    Free(AccessDims); \
+    Free(AccessDims);
 
 #define _BINARY_ELEMENTWISE_OP_DTYPE(A, B, Result, OPERATION, OP_TYPE) \
-    Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for" #OPERATION "operation"); \
+    Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for " #OPERATION " operation"); \
     Assert (A.Header->DType == dtype_int32 || A.Header->DType == dtype_float32, #OPERATION " can only be carried over int/float tensors"); \
     Assert (B.Header->DType == dtype_int32 || B.Header->DType == dtype_float32, #OPERATION " can only be carried over int/float tensors"); \
-    Assert(IsShapeEqual(A.Header, Result.Header), "shape mismatch for" #OPERATION "operation"); \
+    Assert(IsShapeEqual(A.Header, Result.Header), "shape mismatch for " #OPERATION " operation"); \
     if(A.Header->DType == B.Header->DType) \
     { \
         if(A.Header->DType == dtype_float32) \
@@ -316,10 +348,7 @@ PrintTensor32(tensor32 Tensor)
             Result.Header->DType = dtype_float32; \
         } \
         else Assert(0, "invalid code path"); \
-    } \
-
-
-// NOTE(Abid): Elementwise Operations
+    }
 internal tensor32
 T32Add(tensor32 A, tensor32 B, tensor32 Result)
 {
@@ -374,7 +403,7 @@ T32Div(tensor32 A, tensor32 B, tensor32 Result)
             } \
             for(uint32 Idx = 0; Idx < NewSizes[AccessDimIdx]; ++Idx) \
             { \
-                ((DTYPE *)ResultTen.Storage)[ResultOuterDimOffset] = ((DTYPE *)A.Storage)[ATenOuterDimOffset]; \
+                ((DTYPE *)ResultTen.Data)[ResultOuterDimOffset] = ((DTYPE *)A.Data)[ATenOuterDimOffset]; \
                 ATenOuterDimOffset += NewStrides[AccessDimIdx]; \
                 ResultOuterDimOffset += ResultTen.Header->Strides[AccessDimIdx]; \
             } \
@@ -382,9 +411,7 @@ T32Div(tensor32 A, tensor32 B, tensor32 Result)
             AccessDims[AccessDimIdx--] = 0; \
             if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
         } \
-    } \
-
-
+    }
 internal tensor32
 T32Transpose(tensor32 A, int32 Dim1, int32 Dim2, tensor32 ResultTen)
 {
@@ -547,11 +574,11 @@ I32TenMatMul(tensor_i32 A, tensor_i32 B)
                     int32 Result = 0;
                     for(uint32 Idx = 0; Idx < CollapsedInnerDim; ++Idx)
                     {
-                        int32 AVal = A.Storage[ATenOffset + Idx*A.Header->Strides[A.Header->Dim-1]];
-                        int32 BVal = B.Storage[BTenOffset + Idx*B.Header->Strides[B.Header->Dim-2]];
+                        int32 AVal = A.Data[ATenOffset + Idx*A.Header->Strides[A.Header->Dim-1]];
+                        int32 BVal = B.Data[BTenOffset + Idx*B.Header->Strides[B.Header->Dim-2]];
                         Result += AVal*BVal;
                     }
-                    ResultTen.Storage[ResultOuterDimOffset + ResultOffset] = Result;
+                    ResultTen.Data[ResultOuterDimOffset + ResultOffset] = Result;
                 }
             }
 
@@ -610,7 +637,7 @@ I32TenNeg(tensor_i32 A)
 
             for(uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx)
             {
-                Result.Storage[ResultOuterDimOffset] = A.Storage[ATenOuterDimOffset]*-1;
+                Result.Data[ResultOuterDimOffset] = A.Data[ATenOuterDimOffset]*-1;
 
                 ATenOuterDimOffset += A.Header->Strides[AccessDimIdx];
                 ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx];

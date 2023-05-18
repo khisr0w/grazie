@@ -48,7 +48,6 @@ typedef struct
     uint32 *Strides;
     uint32 Dim;
     uint32 Offset;
-    float32 Grad;
 
     // boolean IsPersist;
     boolean ShouldGrad;
@@ -57,19 +56,14 @@ typedef struct
     op_info DerivedOp;
 } tensor_header;
 
-typedef struct
+typedef struct tensor32 tensor32;
+struct tensor32
 {
     tensor_header *Header;
 
-    void *Storage;
-} tensor32;
-
-typedef struct
-{
-    tensor_header *Header;
-
-    float32 *Storage;
-} tensor_f32;
+    void *Data;
+    void *Grad;
+};
 
 #define TENSOR_H
 #endif

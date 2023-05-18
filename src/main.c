@@ -25,19 +25,21 @@
 
 int main()
 {
+    TensorFromArrayLiteral(Ten1, float32,
+                           SHAPE(2, 3),
+                           ARRAY(-2.4f, 1.43f, 5.8f,
+                                  12.14f, 5.5f, 3.2f));
+
+    TensorFromArrayLiteral(Ten2, float32,
+                           SHAPE(2, 3),
+                           ARRAY(-1, 4, 8,
+                                  2, 7, 9));
+
+    PrintTensor32Data(Ten2);
+
     uint32 Shape1[] = {2, 3};
-
-    float32 Value1[] = {-2.4f, 1.43f, 5.8f,
-                        12.14f, 5.5f, 3.2f};
-    tensor32 Ten1 = F32Tensor(Shape1, Value1);
-
-    int32 Value2[] = {-1, 4, 8,
-                       2, 7, 9};
-    tensor32 Ten2 = I32Tensor(Shape1, Value2);
-
-    tensor32 ResultAdd = _I32Tensor(Shape1, ArrayLength(Shape1), 0, 0, false);
-
-    tensor32 ResultTranpose = _F32Tensor(Shape1, ArrayLength(Shape1), 0, 0, false);
+    tensor32 ResultAdd = _int32AllocTensor(Shape1, ArrayLength(Shape1), 0, 0, false);
+    tensor32 ResultTranpose = _float32AllocTensor(Shape1, ArrayLength(Shape1), 0, 0, false);
 
     ResultAdd = T32Add(Ten1, Ten2, ResultAdd);
     ResultTranpose = T32TransposeAll(ResultAdd, ResultTranpose);
@@ -56,7 +58,7 @@ int main()
     PrintI32Tensor(((tensor_i32 *)(((tensor_i32 *)Result.Header->DerivedOp.Operands)[1]).Header->DerivedOp.Operands)[0]);
 #endif
 
-    PrintTensor32(ResultTranpose);
+    PrintTensor32Data(ResultTranpose);
 
     return 0;
 }
