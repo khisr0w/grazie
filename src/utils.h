@@ -23,6 +23,7 @@
 // NOTE(Abid): typedef and static define for ease of use
 typedef uint32_t uint32;
 typedef int32_t int32;
+typedef int64_t int64;
 typedef uintptr_t uintptr;
 typedef float float32;
 typedef double float64;

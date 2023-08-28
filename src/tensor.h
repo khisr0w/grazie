@@ -9,6 +9,13 @@
 
 typedef enum
 {
+    storage_Data,
+    storage_Grad,
+
+} storage_type;
+
+typedef enum
+{
     op_None,
 
     op_UnaryNegate,
@@ -28,14 +35,23 @@ typedef enum
 
 typedef enum
 {
+    brule_NotExist = 0,
+    brule_SameSize,
+    brule_LTERepeat,
+    brule_GTERepeat,
+} broadcast_rules;
+
+typedef enum
+{
     dtype_int32 = 1,
     dtype_float32 = 2,
 } tensor_dtype;
 
+typedef struct tensor32 tensor32;
 typedef struct
 {
     tensor_op TensorOp;
-    void *Operands;
+    tensor32 *Operands;
 
     // NOTE(Abid): This is used for storing context data related to operations,
     //             One of the main uses is to store the dimensions that transposed.
@@ -49,14 +65,20 @@ typedef struct
     uint32 Dim;
     uint32 Offset;
 
+    uint32 *AccessSizes; // NOTE(Abid): This is stricly for optimizing math ops.
+    size_t DataStorageSize;
+
     // boolean IsPersist;
     boolean ShouldGrad;
+    boolean GradStorageInit;
+
+    boolean IsContiguous;
+
     tensor_dtype DType;
 
     op_info DerivedOp;
 } tensor_header;
 
-typedef struct tensor32 tensor32;
 struct tensor32
 {
     tensor_header *Header;

@@ -25,26 +25,64 @@
 
 int main()
 {
-    TensorFromArrayLiteral(Ten1, float32,
-                           SHAPE(2, 3),
-                           ARRAY(-2.4f, 1.43f, 5.8f,
-                                  12.14f, 5.5f, 3.2f));
+    tensor32 Ten1 = TensorFromArrayLiteral(Ten1, float32,
+                                           SHAPE(2, 1, 3),
+                                           ARRAY(-2.4f, 1.43f, 5.8f,
 
-    TensorFromArrayLiteral(Ten2, float32,
-                           SHAPE(2, 3),
-                           ARRAY(-1, 4, 8,
-                                  2, 7, 9));
+                                                 -3.4f, 2.43f, 6.8f));
 
-    PrintTensor32Data(Ten2);
+    tensor32 Ten2 = TensorFromArrayLiteral(Ten2, float32,
+                                           SHAPE(2, 3),
+                                           ARRAY(-1, 4, 3,
+                                                  2, 7, 5));
+#if 0
+    // NOTE(Abid): Test for when one of the dimension is 1
+    tensor32 Ten1 = TensorFromArrayLiteral(Ten1, float32,
+                                           SHAPE(2, 3, 2),
+                                           ARRAY(-2.4f, 1.43f,
+                                                  5.8f, 12.14f,
+                                                  5.5f, 3.2f,
 
-    uint32 Shape1[] = {2, 3};
-    tensor32 ResultAdd = _int32AllocTensor(Shape1, ArrayLength(Shape1), 0, 0, false);
+                                                 -3.4f, 2.43f,
+                                                  6.8f, 13.14f,
+                                                  6.5f, 4.2f));
+
+    tensor32 Ten2 = TensorFromArrayLiteral(Ten2, float32,
+                                           SHAPE(2, 1, 2),
+                                           ARRAY(-1, 4,
+
+                                                  2, 7,));
+#endif
+
+#if 0
+    uint32 Temp;
+    Temp = Ten1.Header->Strides[0];
+    Ten1.Header->Strides[0] = Ten1.Header->Strides[1];
+    Ten1.Header->Strides[1] = Temp; 
+
+    Temp = Ten1.Header->Sizes[0];
+    Ten1.Header->Sizes[0] = Ten1.Header->Sizes[1];
+    Ten1.Header->Sizes[1] = Temp; 
+#endif
+
+    uint32 Shape1[] = {2, 2, 4};
+    tensor32 ResultAdd = _float32AllocTensor(Shape1, ArrayLength(Shape1), 0, 0, false);
+    ResultAdd = T32Add(Ten1, Ten2, ResultAdd);
+    PrintTensor32(ResultAdd);
+
+#if 0
+    printf("Grad before setting it: \n");
+    CallOnGradStorage(Ten2, PrintTensor32(Ten2));
+    CallOnGradStorage(Ten2, T32SetElementsInPlace(Ten2, 15.4f));
+    printf("Grad after setting it: \n");
+    CallOnGradStorage(Ten2, PrintTensor32(Ten2));
+    printf("Now the data: \n");
+    PrintTensor32(Ten2);
+
     tensor32 ResultTranpose = _float32AllocTensor(Shape1, ArrayLength(Shape1), 0, 0, false);
 
     ResultAdd = T32Add(Ten1, Ten2, ResultAdd);
     ResultTranpose = T32TransposeAll(ResultAdd, ResultTranpose);
-
-#if 0
     tensor_i32 Ten2 = I32Tensor(Shape2, Value2);
 
     tensor_i32 Result = I32TenMatMul(Ten1, I32TenTransposeAll(Ten2));
@@ -56,9 +94,9 @@ int main()
 
     printf("Transpose Operand of the Second Operand\n");
     PrintI32Tensor(((tensor_i32 *)(((tensor_i32 *)Result.Header->DerivedOp.Operands)[1]).Header->DerivedOp.Operands)[0]);
-#endif
 
-    PrintTensor32Data(ResultTranpose);
+    PrintTensor32Grad(ResultTranpose);
+#endif
 
     return 0;
 }

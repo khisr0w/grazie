@@ -19,8 +19,9 @@ typedef struct
 {
     stack_block *CurrentStackBlock;
     size_t CurrentStackTopIdx;
-    int32 GlobalMaxTensorNum;
-    int32 RunningTensorNum;
+    size_t GlobalMaxTensorNum;
+    size_t RunningTensorNum;
+    size_t NewAllocTensorNum;
 
     stack_block *ReservedBlock;
 } stack_blocks_state;
@@ -29,6 +30,18 @@ internal inline boolean
 IsStackBlocksEmpty(stack_blocks_state *State)
 {
     return ((State->CurrentStackTopIdx == -1) && (!State->CurrentStackBlock));
+}
+
+internal inline stack_block *
+AllocNewStackBlock(size_t NumTensors, stack_block *BelowBlock)
+{
+    stack_block *Result = (stack_block *)Malloc(NumTensors*sizeof(tensor32) + sizeof(stack_block));
+    Assert(Result, "failed to allocate stack block");
+    Result->TensorPtr = (tensor32 *)(Result+1);
+    Result->NumTensors = NumTensors;
+    Result->BelowBlock = BelowBlock;
+
+    return Result;
 }
 
 internal inline void
@@ -43,24 +56,21 @@ StackBlockPush(stack_blocks_state *State, tensor32 Tensor)
         {
             NewBlock = State->ReservedBlock;
             State->ReservedBlock = NULL;
+            NewBlock->BelowBlock = State->CurrentStackBlock;
         }
         else
         {
-            // TODO(Abid): Change the number of allocated memory here to get greater sizes of stack block.
-            // WARNING(Abid): Do not allocate based on the NumTensors of previous block size it might be a ReservedBlock.
-            //                Maybe have a variable in the State that tracks the growth rate of new blocks.
-            size_t NewNumTensor = State->CurrentStackBlock->NumTensors;
-            NewBlock = (stack_block *)Malloc(NewNumTensor*sizeof(tensor32) + sizeof(stack_block));
-            NewBlock->TensorPtr = (tensor32 *)(NewBlock+1);
-            NewBlock->NumTensors = NewNumTensor;
+            // TODO(Abid): Tweak the NewAllocTensorNum growth factor to something reasonable
+            State->NewAllocTensorNum += (int32)(State->NewAllocTensorNum/2);
+            NewBlock = AllocNewStackBlock(State->NewAllocTensorNum, State->CurrentStackBlock);
         }
 
-        NewBlock->BelowBlock = State->CurrentStackBlock;
         State->CurrentStackBlock = NewBlock;
         State->CurrentStackTopIdx = (size_t)-1;
     }
 
     State->CurrentStackBlock->TensorPtr[++State->CurrentStackTopIdx] = Tensor;
+    // NOTE(Abid): Find the maximum number of tensors in the stack throughout all the runs of the same computation chain.
     ++State->RunningTensorNum;
     if(State->RunningTensorNum > State->GlobalMaxTensorNum) State->GlobalMaxTensorNum = State->RunningTensorNum;
 }
@@ -68,17 +78,21 @@ StackBlockPush(stack_blocks_state *State, tensor32 Tensor)
 internal inline void
 StackBlockPop(stack_blocks_state *State)
 {
-    Assert(State->CurrentStackTopIdx != -1, "cannot pop empty stack");
+    Assert((State->CurrentStackTopIdx != -1) || (!State->CurrentStackBlock), "cannot pop empty stack");
     State->CurrentStackTopIdx--;
-    ++State->RunningTensorNum;
+    --State->RunningTensorNum;
 
-    // NOTE(Abid): Free if block is empty.
+    // NOTE(Abid): Reserve if block is empty, while freeing the already reserved block.
     if(State->CurrentStackTopIdx == -1)
     {
         stack_block *Temp = State->CurrentStackBlock->BelowBlock;
 
         // NOTE(Abid): Hold onto one extra block in case we push right after freeing a block.
-        if(State->ReservedBlock) Free(State->CurrentStackBlock);
+        if (State->ReservedBlock)
+        {
+            Free(State->ReservedBlock);
+            State->ReservedBlock = State->CurrentStackBlock;
+        }
         else State->ReservedBlock = State->CurrentStackBlock;
 
         State->CurrentStackBlock = Temp;
@@ -91,7 +105,6 @@ StackBlockTop(stack_blocks_state *State) {
     Assert(State->CurrentStackTopIdx != -1, "cannot get top of an empty stack");
     return State->CurrentStackBlock->TensorPtr[State->CurrentStackTopIdx];
 }
-
 
 internal void
 Backward(tensor32 RootTensor)
@@ -122,8 +135,9 @@ Backward(tensor32 RootTensor)
     */
 
     local_persist tensor32 PrevRootTensor = {0};
+    local_persist stack_blocks_state State = {NULL, (size_t)-1, 0, 0, 2, NULL};
 
-    local_persist stack_blocks_state State = {0, (size_t)-1, 0, 0};
+    Assert(RootTensor.Grad, "root tensor grad is not tracked");
 
     // NOTE(Abid): If the below condition doesn't hit, then we are in the nth step of the same computation chain.
     if((PrevRootTensor.Header != RootTensor.Header) ||
@@ -132,7 +146,6 @@ Backward(tensor32 RootTensor)
         // NOTE(Abid): Its the first run of a new computation chain.
         if(PrevRootTensor.Header && PrevRootTensor.Data)
         {
-            Assert(State.CurrentStackBlock, "CurrentStackBlock given NULL");
             while(State.CurrentStackBlock)
             {
                 stack_block *NextBlock = State.CurrentStackBlock->BelowBlock;
@@ -140,33 +153,32 @@ Backward(tensor32 RootTensor)
                 State.CurrentStackBlock = NextBlock;
             }
 
-            State.CurrentStackTopIdx = (size_t)-1;
-            State.GlobalMaxTensorNum = 0;
+            // NOTE(Abid): Free the reserved block from previous runs
+            Free(State.ReservedBlock);
+            State.ReservedBlock = NULL;
+
         }
 
         // NOTE(Abid): This will be the same whether this is the first call of the routine
         //             or we have a new computation chain.
-        size_t InitialStackTensorNum = 2;
-        State.CurrentStackBlock = (stack_block *)Malloc(InitialStackTensorNum*sizeof(tensor32)+
-                                                                   sizeof(stack_block));
-        State.CurrentStackBlock->TensorPtr = (tensor32 *)(State.CurrentStackBlock+1);
-                                                                  
-        Assert(State.CurrentStackBlock->TensorPtr, "failed to allocate stack");
-        State.CurrentStackBlock->NumTensors = InitialStackTensorNum;
+        State.CurrentStackTopIdx = (size_t)-1;
+        State.GlobalMaxTensorNum = 0;
+        State.RunningTensorNum = 0;
+        State.NewAllocTensorNum = 2;
+
+        State.CurrentStackBlock = AllocNewStackBlock(State.NewAllocTensorNum, NULL);
     }
 
     // NOTE(Abid): Backpropagation logic starts here
-
     StackBlockPush(&State, RootTensor);
-    tensor32 CurrentTensor = StackBlockTop(&State);
-    // tensor32 *FirstOperand = (tensor32 *)(Ten.Header->DerivedOp.Operands);
-    // tensor32 *SecondOperand = FirstOperand+1;
-    tensor_op Operation = CurrentTensor.Header->DerivedOp.TensorOp;
-    // Operation = op_BinarySub;
+    CallOnGradStorage(RootTensor, T32SetElementsInPlace(RootTensor, 1.f));
 
-    while(IsStackBlocksEmpty(&State))
+    while(!IsStackBlocksEmpty(&State))
     {
-        switch (Operation)
+        tensor32 CurrentTensor = StackBlockTop(&State);
+        StackBlockPop(&State);
+
+        switch (CurrentTensor.Header->DerivedOp.TensorOp)
         {
             case op_UnaryNegate:
             {
@@ -182,6 +194,20 @@ Backward(tensor32 RootTensor)
             } break;
             case op_BinaryAdd:
             {
+                tensor32 FirstOperand = CurrentTensor.Header->DerivedOp.Operands[0];
+                tensor32 SecondOperand = CurrentTensor.Header->DerivedOp.Operands[1];
+                if(SecondOperand.Header->ShouldGrad)
+                {
+                    Assert(SecondOperand.Header->GradStorageInit, "no grad storage for trackable tensor");
+                    StackBlockPush(&State, SecondOperand);
+                }
+                if(FirstOperand.Header->ShouldGrad)
+                {
+                    Assert(FirstOperand.Header->GradStorageInit, "no grad storage for trackable tensor");
+                    StackBlockPush(&State, FirstOperand);
+                }
+
+                StackBlockTop(&State);
             } break;
             case op_BinarySub:
             {
@@ -195,21 +221,26 @@ Backward(tensor32 RootTensor)
             case op_BinaryMatmul:
             {
             } break;
+            case op_None:
+            {
+                continue;
+            } break;
             default: Assert(0, "invalid code path");
         }
     }
 
-    // NOTE(Abid): If multiple blocks have been allocated, free all and create a block with maximum needed stack size.
-    if(State.CurrentStackBlock->BelowBlock)
+    Assert(!State.CurrentStackBlock, "oops, we should not have current block at the end");
+
+    // NOTE(Abid): Check if our maximum required stack size exceeded the reserved blocks's size, which means we haven't
+    //             caliberated the optimal size. Should only happen if new chain is introduced or on the first run.
+    Assert(State.ReservedBlock, "reserved block should've been here! Gary, who took the block, man?");
+    if(State.GlobalMaxTensorNum > State.ReservedBlock->NumTensors)
     {
-        while(State.CurrentStackBlock)
-        {
-            stack_block *NextBlock = State.CurrentStackBlock->BelowBlock;
-            Free(State.CurrentStackBlock); 
-            State.CurrentStackBlock = NextBlock;
-        }
-        State.CurrentStackBlock = (stack_block *)Malloc(State.GlobalMaxTensorNum*sizeof(tensor32) + sizeof(stack_block));
+        Free(State.ReservedBlock); 
+        State.ReservedBlock = AllocNewStackBlock(State.GlobalMaxTensorNum, NULL);
     }
 
     PrevRootTensor = RootTensor;
+
+    State.RunningTensorNum = 0;
 }
