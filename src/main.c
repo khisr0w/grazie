@@ -1,7 +1,6 @@
 /*
     TODO(Abid):
 
-    - Create a fixed memory scheme that would be done at the start up
       EDIT: Fixed memory scheme doesn't seem to make sense here, its not an end product
             but a tool for development and so fixed memory will create headaches, not
             to mention memory fragmentation as stuff are allocated and deallocated.
@@ -16,7 +15,7 @@
             If the program fills the memory to a certain point, we can allocate more.
 
     - Assign operands to each tensor that goes through a tensor operation, along with the op type.
-      - Check that after operations, the only the oldest non-leaf tensor gets overwritten.
+      - Check that after operations, only the oldest non-leaf tensor gets overwritten.
     - Better (effecient) implementation of the tensor operations, maybe start with the the MatMul
     - Make the tensor struct more generic so we can have float and int at the same time.
 */
@@ -65,9 +64,9 @@ int main()
     Ten1.Header->Sizes[1] = Temp; 
 #endif
 
-    uint32 Shape1[] = {2, 2, 4};
-    tensor32 ResultAdd = _float32AllocTensor(Shape1, ArrayLength(Shape1), 0, 0, false);
-    ResultAdd = T32Add(Ten1, Ten2, ResultAdd);
+    uint32 Shape1[] = {2, 2, 3};
+    tensor32 ResultAdd = T32Empty(Shape1, float32);
+    T32Add(Ten1, Ten2, ResultAdd);
     PrintTensor32(ResultAdd);
 
 #if 0

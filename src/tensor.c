@@ -11,7 +11,7 @@
 
    - Add broadcast information for `Backward` computation.
    - Here is an important question: if we do a transpose and change the layout of the data
-     then the grad should also be changed?
+     then should the grad also be changed?
    - The stride calculation is trivial and makes operation on inplace tranposed tensor slow
    - Write a more efficient math ops routines for when `IsContiguous = true` in the tensor
 
@@ -51,7 +51,7 @@
 
 #include "tensor.h"
 
-#define _ALLOC_TENSOR_DTYPE(TYPE, DTYPE) \
+#define __ALLOC_TENSOR_DTYPE(TYPE, StoreGrad) \
     tensor32 Result = {0}; \
     \
     size_t DataSize = 1; \
@@ -62,8 +62,7 @@
                        2*ShapeLength*sizeof(uint32) + /* NOTE(Abid): For Stride, Shape */ \
                        ShapeLength*sizeof(uint32) + /* NOTE(Abid): For SizesAccessPtr */ \
                        2*sizeof(tensor32) + /* NOTE(Abid): For tensor operands */ \
-                       DataSize*sizeof(TYPE); \
-    if(IS_GRAD_PRESERVE()) FinalSize += DataSize*sizeof(float32); /* NOTE(Abid): For Grad storage */ \
+                       ((int32)StoreGrad + 1)*DataSize*sizeof(TYPE); /* StoreGrad for backprop */ \
     \
     /* NOTE(Abid): Memory mapping */ \
     Result.Header = (tensor_header *)Malloc(FinalSize); \
@@ -71,9 +70,9 @@
     Result.Header->Sizes = (uint32 *)(Result.Header+1); \
     Result.Header->Strides = (uint32 *)(Result.Header->Sizes + ShapeLength); \
     Result.Header->AccessSizes = (uint32 *)(Result.Header->Strides + ShapeLength); \
-    Result.Header->DType = DTYPE; \
+    Result.Header->DType = dtype_##TYPE; \
     Result.Header->IsContiguous = true; \
-    Result.Header->DataStorageSize = DataSize; \
+    Result.Header->StorageNumElements = DataSize; \
     /* NOTE(Abid): Setting whether to compute the backward pass or not */ \
     Result.Header->ShouldGrad = IS_GRAD_PRESERVE(); \
     Result.Header->GradStorageInit = IS_GRAD_PRESERVE(); \
@@ -82,10 +81,12 @@
                                                               Figure out a max ceiling and always allocate that at init */ \
     \
     Result.Header->DerivedOp.Operands = (tensor32 *)(Result.Header->AccessSizes + ShapeLength); \
-    Result.Data = (void *)((tensor32 *)Result.Header->DerivedOp.Operands + 2); /* NOTE(Abid): 2 operands by default */ \
-    if(Result.Header->GradStorageInit) Result.Grad = ((TYPE *)Result.Data) + DataSize; \
+    Result.Data = (void *)((tensor32 *)Result.Header->DerivedOp.Operands + 2); /* 2 operands by default */ \
+    if(StoreGrad) { \
+        Result.Grad = ((TYPE *)Result.Data) + DataSize; \
+        memset(Result.Grad, 0, DataSize*sizeof(TYPE)); \
+    } \
     else Result.Grad = NULL; \
-    memset(Result.Grad, 0, DataSize*sizeof(float32)); \
     \
     /* NOTE(Abid): Setting Default Values */ \
     Result.Header->Offset = 0; \
@@ -93,37 +94,35 @@
     memcpy(Result.Header->Sizes, Shape, ShapeLength*sizeof(uint32)); \
     \
     /* NOTE(Abid): Calculate the strides given the tensor shape */ \
-    for(uint32 i = 0; i < Result.Header->Dim; ++i) \
-    { \
+    for(uint32 i = 0; i < Result.Header->Dim; ++i) { \
         if(Result.Header->Sizes[i] == 1) Result.Header->Strides[i] = 0; \
         else Result.Header->Strides[i] = 1; \
     } \
-    if(Result.Header->Dim > 1) \
-    { /* NOTE(Abid): If the size in a dim is 1, then the stride will be zero */ \
+    if(Result.Header->Dim > 1) { \
+        /* NOTE(Abid): If the size in a dim is 1, then the stride will be zero */ \
         for(uint32 i = 0; i < (Result.Header->Dim-1); ++i) \
                 for(uint32 j = i+1; j < Result.Header->Dim; ++j) { Result.Header->Strides[i] *= \
                                                                    Result.Header->Sizes[j]; } \
     } \
     \
-    if(Intialize) \
-    { \
+    if(Data) { \
         /* NOTE(Abid): Check if the DataLength makes sense with the shape */ \
-        Assert(DataLength == DataSize, "Mismatch of data and tensor shape"); \
+        Assert(DataLength == DataSize, "data and tensor shape mismatch"); \
         memcpy(Result.Data, Data, DataSize*sizeof(TYPE)); \
     } \
     \
     return Result; \
 
-#define F32Tensor(Shape, Data) _float32AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
-internal inline tensor32
-_float32AllocTensor(uint32 *Shape, uint32 ShapeLength, float32 *Data, size_t DataLength, boolean Intialize)
-{ _ALLOC_TENSOR_DTYPE(float32, dtype_float32); }
+#define T32Data(Shape, Data, TYPE) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data))
+#define T32Empty(Shape, TYPE) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), 0, 0)
 
-
-#define I32Tensor(Shape, Data) _int32AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), true)
 internal inline tensor32
-_int32AllocTensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLength, boolean Intialize)
-{ _ALLOC_TENSOR_DTYPE(int32, dtype_int32); }
+_float32AllocTensor(uint32 *Shape, uint32 ShapeLength, float32 *Data, size_t DataLength)
+{ __ALLOC_TENSOR_DTYPE(float32, false); }
+
+internal inline tensor32
+_int32AllocTensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLength)
+{ __ALLOC_TENSOR_DTYPE(int32, false); }
 
 #define SHAPE(...) __VA_ARGS__
 #define ARRAY(...) __VA_ARGS__
@@ -134,7 +133,7 @@ _int32AllocTensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLen
         uint32 Shape_Arr[] = { Shape }; \
         DTYPE Values_Arr[] = { Values }; \
         NAME = _##DTYPE##AllocTensor(Shape_Arr, ArrayLength(Shape_Arr), \
-                                     Values_Arr, ArrayLength(Values_Arr), true); \
+                                     Values_Arr, ArrayLength(Values_Arr)); \
     } while(0);
 
 internal inline size_t
@@ -263,14 +262,14 @@ T32SetElementsInPlace(tensor32 A, float32 Value)
         {
             float32 TempVal = Value;
             float32 *StoragePtr = (float32 *)A.Data;
-            for(int32 Idx = 0; Idx < A.Header->DataStorageSize; ++Idx)
+            for(int32 Idx = 0; Idx < A.Header->StorageNumElements; ++Idx)
                 StoragePtr[Idx] = TempVal;
         } break;
         case dtype_int32:
         {
             int32 TempVal = (int32)Value;
             int32 *StoragePtr = (int32 *)A.Data;
-            for(int32 Idx = 0; Idx < A.Header->DataStorageSize; ++Idx)
+            for(int32 Idx = 0; Idx < A.Header->StorageNumElements; ++Idx)
                 StoragePtr[Idx] = TempVal;
         } break;
         default: Assert(0, "invalid code path");
@@ -516,7 +515,7 @@ internal tensor32
 T32Add(tensor32 A, tensor32 B, tensor32 Result)
 {
     // TODO(Abid): Do Assert here that result does match with the highest dim
-    int64 ResDataLeft = Result.Header->DataStorageSize;
+    int64 ResDataLeft = Result.Header->StorageNumElements;
     uintptr AOffset = 0;
     uintptr BOffset = 0;
     uintptr ResultOffset = 0;

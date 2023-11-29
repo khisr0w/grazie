@@ -66,7 +66,7 @@ typedef struct
     uint32 Offset;
 
     uint32 *AccessSizes; // NOTE(Abid): This is stricly for optimizing math ops.
-    size_t DataStorageSize;
+    size_t StorageNumElements;
 
     // boolean IsPersist;
     boolean ShouldGrad;
