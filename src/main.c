@@ -30,7 +30,7 @@ int main()
 
                                                  -3.4f, 2.43f, 6.8f));
 
-    tensor32 Ten2 = TensorFromArrayLiteral(Ten2, float32,
+    tensor32 Ten2 = TensorFromArrayLiteral(Ten2, int32,
                                            SHAPE(2, 3),
                                            ARRAY(-1, 4, 3,
                                                   2, 7, 5));
@@ -62,12 +62,18 @@ int main()
     Temp = Ten1.Header->Sizes[0];
     Ten1.Header->Sizes[0] = Ten1.Header->Sizes[1];
     Ten1.Header->Sizes[1] = Temp; 
-#endif
 
     uint32 Shape1[] = {2, 2, 3};
     tensor32 ResultAdd = T32Empty(Shape1, float32);
-    T32Add(Ten1, Ten2, ResultAdd);
+    T32Mul(Ten1, Ten2, ResultAdd);
     PrintTensor32(ResultAdd);
+#endif
+
+    uint32 Shape1[] = {2, 3};
+    tensor32 Result = T32Empty(Shape1, int32);
+    T32Transpose(Ten2, 0, -1, Result);
+    T32TransposeInPlace(Ten2, 0, -1);
+    PrintTensor32(Ten2);
 
 #if 0
     printf("Grad before setting it: \n");

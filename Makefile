@@ -17,8 +17,8 @@ ifeq ($(OS),Windows_NT)
 EXECUTABLE := grazie.exe
 CC := cl
 CFLAGS_COMMON := /EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208 /wd4505 /wd4127
-CFLAGS_DEBUG := /Od /MTd /Z7 /Zo /DDEBUG
-CFLAGS_RELEASE := /O2 /Oi /MT /DRELEASE
+CFLAGS_DEBUG := /Od /MTd /Z7 /Zo /DGRAZIE_DEBUG
+CFLAGS_RELEASE := /O2 /Oi /MT /DGRAZIE_RELEASE
 endif
 
 # Source files
@@ -54,7 +54,7 @@ $(DEBUG_DIR)/main.obj: $(SRC_DIR)/main.c
 	@echo "    [Debug] Compiling Objects..."
 
 ifeq ($(OS),Windows_NT)
-	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) /Fo$@ /c $<
+	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG)  /Fo$@ /c $<
 else
 	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -c $< -o $@ 
 endif

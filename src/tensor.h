@@ -43,8 +43,8 @@ typedef enum
 
 typedef enum
 {
+    dtype_float32 = 0,
     dtype_int32 = 1,
-    dtype_float32 = 2,
 } tensor_dtype;
 
 typedef struct tensor32 tensor32;

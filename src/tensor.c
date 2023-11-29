@@ -190,10 +190,6 @@ _PrintIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_heade
     return IsOuterDim;
 }
 
-// TODO(Abid): The print currently is leaking memory since its not freeing the tensors that are
-//             the result of in-argument computations. Needs to be macro'ed out once memory
-//             module is written.
-
 #define _PRINT_DTYPE(TEN_NAME, STORAGE, TYPE, PRINT_FORMAT) \
     printf(TEN_NAME); \
     printf(" -> shape ("); \
@@ -248,7 +244,7 @@ PrintTensor32(tensor32 Tensor)
     switch(DType)
     {
         case dtype_int32: { _PRINT_DTYPE("tensor i32", Data, int32, "%d"); } break;
-        case dtype_float32: { _PRINT_DTYPE("tensor f32", Data, float, "%f"); } break;
+        case dtype_float32: { _PRINT_DTYPE("tensor f32", Data, float, "%.3f"); } break;
         default: Assert(0, "invalid code path");
     }
 }
@@ -276,9 +272,6 @@ T32SetElementsInPlace(tensor32 A, float32 Value)
     }
 }
 
-// =======================================
-// NOTE(Abid): Math Operations tensor_i32
-// =======================================
 // TODO(Abid): Not sure about this, could be bad for perf. if chained
 #define CallOnGradStorage(Tensor, Function) \
     do \
@@ -295,182 +288,26 @@ T32SetElementsInPlace(tensor32 A, float32 Value)
         Tensor.Header->DType = DType; \
     } while(0)
 
-#if 0
-// NOTE(Abid): Elementwise Operations
-#define _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, A_TYPE, B_TYPE, RES_TYPE) \
-    Result.Header->ShouldGrad = IS_GRAD_PRESERVE(); \
-    tensor32 GTETensor = A; \
-    tensor32 LTETensor = B; \
-    if(A.Header->Dim < B.Header->Dim) \
-    { \
-        GTETensor = B; \
-        LTETensor = A; \
-    } \
-    \
-    uint32 MaxDim = GTETensor.Header->Dim; \
-    size_t *ResultAccessDims = (uint32 *)Calloc(MaxDim*(1+1+1 + 1 + 1), sizeof(uint32)); /* TODO(Abid): Do not allocate here */ \
-    size_t *GTETensorAccessDims = ResultAccessDims + MaxDim; \
-    size_t *LTETensorAccessDims = GTETensorAccessDims + MaxDim; \
-    uint32 *MaxResultSizes = ResultAccessDims + MaxDim; \
-    broadcast_rules *BroadcastRules = (broadcast_rules *)(MaxResultSizes + MaxDim);\
-    int32 AccessDimIdx = 0; \
-    \
-    uint32 DimDiff = GTETensor.Header->Dim - LTETensor.Header->Dim; \
-    for (uint32 Idx = 1; Idx <= MaxDim: ++Idx) \
-    { \
-        if(LTETensor.Header->Dim - Idx >= 0) \
-        { \
-            uint32 GTESize = GTETensor.Header->Sizes[GTETensor.Header->Dim-Idx] \
-            uint32 LTESize = LTETensor.Header->Sizes[LTETensor.Header->Dim-Idx] \
-            uint32 MaxSize = max(GTESize, LTESize); \
-            boolean IsMinOne = MaxSize + 1 == GTESize + LTESize; \
-            boolean SameDim = 2*MaxSize == GTESize + LTESize; \
-            boolean IsBothOne = IsMinOne && SameDim; \
-            Assert(IsMinOne || SameDim, "tensors are not broadcastable"); \
-            if(IsMinOne) \
-            { \
-                if (IsBothOne) BroadcastRules[MaxDim-Idx] = brule_SameSize; \
-                else if(LTESize == 1) BroadcastRules[MaxDim-Idx] = brule_LTERepeat; \
-                else BroadcastRules[MaxDim-Idx] = brule_GTERepeat; \
-            } \
-            else BroadcastRules[MaxDim-Idx] = brule_GTERepeat; \
-            MaxResultSizes[MaxDim-Idx] = MaxSize; \
-        } \
-        MaxResultSizes[MaxDim-Idx] = GTETensor.Header->Sizes[MaxDim-Idx]; \
-    } \
-    Assert(IsArrayEqual(Result.Header->Sizes, AssumedResultSizes, Result.Header->Dim, MaxDim)) \
-    \
-    /* NOTE(Abid): Binary Op logic here */ \
-    \
 
-    Result.Header->DerivedOp.TensorOp = OP_TYPE; \
-    tensor32 *Operands = Result.Header->DerivedOp.Operands; \
-    Operands[0] = A; \
-    Operands[1] = B; \
-    \
-    Free(AccessDims);
-#endif
+// =======================================
+// NOTE(Abid): Math Operations
+// =======================================
 
-#if 0
-    while(AccessDimIdx >= 0) \
-    { \
-        boolean IsOuterDim = ResultAccessDims < (int32)(MaxDim-1); \
-        if(IsOuterDim) \
-        { \
-            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx]) \
-            { \
-                AccessDims[AccessDimIdx--] = 0; \
-                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
-            } \
-            else ++AccessDimIdx; \
-        } \
-        else \
-        { \
-            size_t ATenOuterDimOffset = 0; \
-            size_t BTenOuterDimOffset = 0; \
-            size_t ResultOuterDimOffset = 0; \
-            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx) \
-            { \
-                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx]; \
-                BTenOuterDimOffset += AccessDims[Idx] * B.Header->Strides[Idx]; \
-                ResultOuterDimOffset += AccessDims[Idx] * Result.Header->Strides[Idx]; \
-            } \
-            for (uint32 Idx = 0; Idx < A.Header->Sizes[AccessDimIdx]; ++Idx) \
-            { \
-                ((RES_TYPE *)Result.Data)[ResultOuterDimOffset] = (RES_TYPE)(((A_TYPE *)A.Data)[ATenOuterDimOffset] OPERATION \
-                                                                                ((B_TYPE *)B.Data)[BTenOuterDimOffset]); \
-                ATenOuterDimOffset += A.Header->Strides[AccessDimIdx]; \
-                BTenOuterDimOffset += B.Header->Strides[AccessDimIdx]; \
-                ResultOuterDimOffset += Result.Header->Strides[AccessDimIdx]; \
-            } \
-            AccessDims[AccessDimIdx--] = 0; \
-            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
-        } \
-    } \
-
-#define _BINARY_ELEMENTWISE_OP_DTYPE(A, B, Result, OPERATION, OP_TYPE) \
-    /* Assert(IsShapeEqual(A.Header, B.Header), "shape mismatch for " #OPERATION " operation"); */ \
-    Assert (A.Header->DType == dtype_int32 || A.Header->DType == dtype_float32, #OPERATION " can only be carried over int/float tensors"); \
-    Assert (B.Header->DType == dtype_int32 || B.Header->DType == dtype_float32, #OPERATION " can only be carried over int/float tensors"); \
-    /* Assert(IsShapeEqual(A.Header, Result.Header), "shape mismatch for " #OPERATION " operation"); */ \
-    Assert(A.Header->Dim > 0, "dimension of the tensor must greater than zero"); \
-    Assert(B.Header->Dim > 0, "dimension of the tensor must greater than zero"); \
-    if(A.Header->DType == B.Header->DType) \
-    { \
-        if(A.Header->DType == dtype_float32) \
-        { \
-            _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, float32, float32, float32); \
-            Result.Header->DType = dtype_float32; \
-        } \
-        else if(A.Header->DType == dtype_int32) \
-        { \
-            if(OP_TYPE == op_BinaryDiv) \
-            { \
-                _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, int32, int32, float32); \
-                Result.Header->DType = dtype_float32; \
-            } \
-            else \
-            { \
-                _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, int32, int32, int32); \
-                Result.Header->DType = dtype_int32; \
-            } \
-        } \
-        else Assert(0, "invalid code path"); \
-    } \
-    else \
-    { \
-        if(B.Header->DType == dtype_float32) \
-        { \
-            _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, int32, float32, float32); \
-            Result.Header->DType = dtype_float32; \
-        } \
-        else if(A.Header->DType == dtype_float32) \
-        { \
-            _BINARY_ELEMENTWISE_OP(A, B, Result, OPERATION, OP_TYPE, float32, int32, float32); \
-            Result.Header->DType = dtype_float32; \
-        } \
-        else Assert(0, "invalid code path"); \
-    }
-
-internal tensor32
-T32Sub(tensor32 A, tensor32 B, tensor32 Result)
-{
-    _BINARY_ELEMENTWISE_OP_DTYPE(A, B, Result, -, op_BinarySub);
-    return Result;
-}
-
-internal tensor32
-T32Mul(tensor32 A, tensor32 B, tensor32 Result)
-{
-    _BINARY_ELEMENTWISE_OP_DTYPE(A, B, Result, *, op_BinaryMul);
-    return Result;
-}
-
-internal tensor32
-T32Div(tensor32 A, tensor32 B, tensor32 Result)
-{
-    _BINARY_ELEMENTWISE_OP_DTYPE(A, B, Result, /, op_BinaryDiv);
-    return Result;
-}
-#endif
-
+// NOTE(Abid): 1. Main routines for elementwise binary operations.
 internal inline void
 _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_header *ResultHeader,
-                        size_t *AOffset, size_t *BOffset, size_t *ResultOffset)
-{
+                        size_t *AOffset, size_t *BOffset, size_t *ResultOffset) {
     uint32 DimIdx = 1;
     // NOTE(Abid): If we've reached the end of the this dim in result tensor
-    while(ResultHeader->AccessSizes[ResultHeader->Dim- DimIdx] == ResultHeader->Sizes[ResultHeader->Dim- DimIdx])
-    {
+    while(ResultHeader->AccessSizes[ResultHeader->Dim- DimIdx] == ResultHeader->Sizes[ResultHeader->Dim- DimIdx]) {
         // NOTE(Abid): If there is nothing left to calculate
-        if(ResultHeader->Dim- DimIdx == 0) break;
+        if(ResultHeader->Dim - DimIdx == 0) break;
 
         int32 ACurrentDim = (int32)AHeader->Dim - DimIdx;
         int32 BCurrentDim = (int32)BHeader->Dim - DimIdx;
         int32 ResultCurrentDim = (int32)ResultHeader->Dim - DimIdx;
 
-        if(ACurrentDim <= 0)
-        { 
+        if(ACurrentDim <= 0) { 
             *AOffset = 0;
             AHeader->AccessSizes[0] = 0;
             // NOTE(Abid): Then B tensor is the one with greater dim
@@ -479,8 +316,7 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
             *BOffset -= BHeader->Strides[BCurrentDim]*BHeader->Sizes[BCurrentDim];
             *BOffset += BHeader->Strides[BCurrentDim-1];
         }
-        else if(BCurrentDim <= 0)
-        {
+        else if(BCurrentDim <= 0) {
             *BOffset = 0;
             BHeader->AccessSizes[0] = 0;
             // NOTE(Abid): Then A tensor is the one with greater dim
@@ -489,8 +325,7 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
             *AOffset -= AHeader->Strides[ACurrentDim]*AHeader->Sizes[ACurrentDim];
             *AOffset += AHeader->Strides[ACurrentDim-1];
         }
-        else
-        {
+        else {
             // NOTE(Abid): Both tensors have dim in this case
             AHeader->AccessSizes[ACurrentDim] = 0;
             ++AHeader->AccessSizes[ACurrentDim-1];
@@ -511,227 +346,87 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
     }
 }
 
-internal tensor32
-T32Add(tensor32 A, tensor32 B, tensor32 Result)
-{
-    // TODO(Abid): Do Assert here that result does match with the highest dim
-    int64 ResDataLeft = Result.Header->StorageNumElements;
-    uintptr AOffset = 0;
-    uintptr BOffset = 0;
-    uintptr ResultOffset = 0;
-    uint32 DimIdx = 1;
-
-    memset(Result.Header->AccessSizes, 0, Result.Header->Dim*sizeof(uintptr));
-    memset(A.Header->AccessSizes, 0, A.Header->Dim*sizeof(uint32));
-    memset(B.Header->AccessSizes, 0, B.Header->Dim*sizeof(uint32));
-    
-    // TODO(Abid): For optimizing this routine, check if we are in a broadcastable dim, then take the
-    //             value that we must broadcast, and then run a for loop continuously operating it until
-    //             the end of this dim.
-    // TODO(Abid): Also, at the start of loop, check if we got 4 values at the tail dimension, and if we
-    //             do, then get all 4 and operate on them instead of going through cache and check.
-    while(ResDataLeft - 4 >= 0)
-    {
-        // NOTE(Abid): Procure 4 ops
-        float32 AVals[4];
-        float32 BVals[4];
-        float32 *ResultPtr[4];
-
-        ResultPtr[0] = (float32 *)Result.Data + ResultOffset;
-        AVals[0] = *((float32 *)A.Data + AOffset);
-        BVals[0] = *((float32 *)B.Data + BOffset);
-        int32 ACurrentDim = (int32)A.Header->Dim - DimIdx;
-        int32 BCurrentDim = (int32)B.Header->Dim - DimIdx;
-        int32 ResultCurrentDim = (int32)Result.Header->Dim - DimIdx;
-        AOffset += A.Header->Strides[ACurrentDim]; ++A.Header->AccessSizes[ACurrentDim];
-        BOffset += B.Header->Strides[BCurrentDim]; ++B.Header->AccessSizes[BCurrentDim];
-        ResultOffset += Result.Header->Strides[ResultCurrentDim]; ++Result.Header->AccessSizes[ResultCurrentDim];
-
-        _CheckEndofDimAndUpdate(A.Header, B.Header, Result.Header, &AOffset, &BOffset, &ResultOffset);
-
-        ResultPtr[1] = (float32 *)Result.Data + ResultOffset;
-        AVals[1] = *((float32 *)A.Data + AOffset);
-        BVals[1] = *((float32 *)B.Data + BOffset);
-        ACurrentDim = (int32)A.Header->Dim - DimIdx;
-        BCurrentDim = (int32)B.Header->Dim - DimIdx;
-        ResultCurrentDim = (int32)Result.Header->Dim - DimIdx;
-        AOffset += A.Header->Strides[ACurrentDim]; ++A.Header->AccessSizes[ACurrentDim];
-        BOffset += B.Header->Strides[BCurrentDim]; ++B.Header->AccessSizes[BCurrentDim];
-        ResultOffset += Result.Header->Strides[ResultCurrentDim]; ++Result.Header->AccessSizes[ResultCurrentDim];
-
-        _CheckEndofDimAndUpdate(A.Header, B.Header, Result.Header, &AOffset, &BOffset, &ResultOffset);
-
-        ResultPtr[2] = (float32 *)Result.Data + ResultOffset;
-        AVals[2] = *((float32 *)A.Data + AOffset);
-        BVals[2] = *((float32 *)B.Data + BOffset);
-        ACurrentDim = (int32)A.Header->Dim - DimIdx;
-        BCurrentDim = (int32)B.Header->Dim - DimIdx;
-        ResultCurrentDim = (int32)Result.Header->Dim - DimIdx;
-        AOffset += A.Header->Strides[ACurrentDim]; ++A.Header->AccessSizes[ACurrentDim];
-        BOffset += B.Header->Strides[BCurrentDim]; ++B.Header->AccessSizes[BCurrentDim];
-        ResultOffset += Result.Header->Strides[ResultCurrentDim]; ++Result.Header->AccessSizes[ResultCurrentDim];
-
-        _CheckEndofDimAndUpdate(A.Header, B.Header, Result.Header, &AOffset, &BOffset, &ResultOffset);
-
-        ResultPtr[3] = (float32 *)Result.Data + ResultOffset;
-        AVals[3] = *((float32 *)A.Data + AOffset);
-        BVals[3] = *((float32 *)B.Data + BOffset);
-        ACurrentDim = (int32)A.Header->Dim - DimIdx;
-        BCurrentDim = (int32)B.Header->Dim - DimIdx;
-        ResultCurrentDim = (int32)Result.Header->Dim - DimIdx;
-        AOffset += A.Header->Strides[ACurrentDim]; ++A.Header->AccessSizes[ACurrentDim];
-        BOffset += B.Header->Strides[BCurrentDim]; ++B.Header->AccessSizes[BCurrentDim];
-        ResultOffset += Result.Header->Strides[ResultCurrentDim]; ++Result.Header->AccessSizes[ResultCurrentDim];
-
-        _CheckEndofDimAndUpdate(A.Header, B.Header, Result.Header, &AOffset, &BOffset, &ResultOffset);
-
-        *ResultPtr[0] = AVals[0] + BVals[0];
-        *ResultPtr[1] = AVals[1] + BVals[1];
-        *ResultPtr[2] = AVals[2] + BVals[2];
-        *ResultPtr[3] = AVals[3] + BVals[3];
-
-        ResDataLeft -= 4;
+#define __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, A_DTYPE, B_DTYPE, R_DTYPE, OP) \
+    /* TODO(Abid): For optimizing this routine, check if we are in a broadcastable dim, then take the
+                   value that we must broadcast, and then run a for loop continuously operating it until
+                   the end of this dim. */ \
+    while(ResDataLeft >= 0) { \
+        *((R_DTYPE *)Result.Data + ResultOffset) = (R_DTYPE)(*((A_DTYPE *)A.Data + AOffset) OP *((B_DTYPE *)B.Data + BOffset)); \
+        int32 ACurrentDim = (int32)A.Header->Dim - DimIdx; \
+        int32 BCurrentDim = (int32)B.Header->Dim - DimIdx; \
+        int32 ResultCurrentDim = (int32)Result.Header->Dim - DimIdx; \
+        AOffset += A.Header->Strides[ACurrentDim]; ++A.Header->AccessSizes[ACurrentDim]; \
+        BOffset += B.Header->Strides[BCurrentDim]; ++B.Header->AccessSizes[BCurrentDim]; \
+        ResultOffset += Result.Header->Strides[ResultCurrentDim]; ++Result.Header->AccessSizes[ResultCurrentDim]; \
+        \
+        _CheckEndofDimAndUpdate(A.Header, B.Header, Result.Header, &AOffset, &BOffset, &ResultOffset); \
+        --ResDataLeft; \
     }
 
-    while(ResDataLeft > 0)
-    {
-        _CheckEndofDimAndUpdate(A.Header, B.Header, Result.Header, &AOffset, &BOffset, &ResultOffset);
-
-        float32 *ResultPtr = (float32 *)Result.Data + ResultOffset;
-        float32 AVals = *((float32 *)A.Data + AOffset);
-        float32 BVals = *((float32 *)B.Data + BOffset);
-        int32 ACurrentDim = (int32)A.Header->Dim - DimIdx;
-        int32 BCurrentDim = (int32)B.Header->Dim - DimIdx;
-        int32 ResultCurrentDim = (int32)Result.Header->Dim - DimIdx;
-        AOffset += A.Header->Strides[ACurrentDim]; ++A.Header->AccessSizes[ACurrentDim];
-        BOffset += B.Header->Strides[BCurrentDim]; ++B.Header->AccessSizes[BCurrentDim];
-        ResultOffset += Result.Header->Strides[ResultCurrentDim]; ++Result.Header->AccessSizes[ResultCurrentDim];
-
-        *ResultPtr = AVals + BVals;
-
-        --ResDataLeft;
-    }
-    
-    return Result;
-}
-
-
-#define _TRANSPOSED_COPY_TENSOR_DTYPE(DTYPE) \
-    while(AccessDimIdx >= 0) \
-    { \
-        /* NOTE(Abid): Check if we are in outer dim and then update */ \
-        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1); \
-        if(IsOuterDim) \
-        { \
-            /* NOTE(Abid): In case we have reached the end of this dimension */ \
-            if(AccessDims[AccessDimIdx] == NewSizes[AccessDimIdx]) \
-            { \
-                AccessDims[AccessDimIdx--] = 0; \
-                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
-            } \
-            else ++AccessDimIdx; \
-        } \
-        else \
-        { \
-            uint32 ATenOuterDimOffset = 0; \
-            uint32 ResultOuterDimOffset = 0; \
-            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx) \
-            { \
-                ATenOuterDimOffset += AccessDims[Idx] * NewStrides[Idx]; \
-                ResultOuterDimOffset += AccessDims[Idx] * ResultTen.Header->Strides[Idx]; \
-            } \
-            for(uint32 Idx = 0; Idx < NewSizes[AccessDimIdx]; ++Idx) \
-            { \
-                ((DTYPE *)ResultTen.Data)[ResultOuterDimOffset] = ((DTYPE *)A.Data)[ATenOuterDimOffset]; \
-                ATenOuterDimOffset += NewStrides[AccessDimIdx]; \
-                ResultOuterDimOffset += ResultTen.Header->Strides[AccessDimIdx]; \
-            } \
-            \
-            AccessDims[AccessDimIdx--] = 0; \
-            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
-        } \
-    }
-internal tensor32
-T32Transpose(tensor32 A, int32 Dim1, int32 Dim2, tensor32 ResultTen)
-{
-    Dim1 = (A.Header->Dim + Dim1) % A.Header->Dim;
-    Dim2 = (A.Header->Dim + Dim2) % A.Header->Dim;
-
-    Assert(ResultTen.Header->DType == A.Header->DType, "tensor type mismatch");
-    Assert(GetStorageSize(ResultTen.Header->Sizes, ResultTen.Header->Dim) == GetStorageSize(A.Header->Sizes, A.Header->Dim),
-           "tensor storage size mismatch");
-    Assert(Dim1 != Dim2, "incorrect dimensions for transpose; select two different dimensions");
-    Assert(((int32)A.Header->Dim >= Dim1) && ((int32)A.Header->Dim >= Dim2),
-           "dimension index out of bounds");
-
-    uint32 *NewSizes = ResultTen.Header->Sizes;
-    uint32 *NewStrides = ResultTen.Header->Strides;
-    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
-    memcpy(NewStrides, A.Header->Strides, A.Header->Dim*sizeof(uint32));
-
-    // NOTE(Abid): Swap the sizes and strides
-    NewSizes[Dim1] = A.Header->Sizes[Dim2];
-    NewSizes[Dim2] = A.Header->Sizes[Dim1];
-    NewStrides[Dim1] = A.Header->Strides[Dim2];
-    NewStrides[Dim2] = A.Header->Strides[Dim1];
-
-    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
-    int32 AccessDimIdx = 0;
-
-    // Copy the tensor to the new one based on DType
-    if (A.Header->DType == dtype_float32) { _TRANSPOSED_COPY_TENSOR_DTYPE(float32) }
-    else if (A.Header->DType == dtype_int32) { _TRANSPOSED_COPY_TENSOR_DTYPE(int32) }
-    else Assert(0, "invalid code path");
-
-    // NOTE(Abid): Add information for backpropagation
-    ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranpose;
-    tensor32 *Operands = ResultTen.Header->DerivedOp.Operands;
-    Operands[0] = A;
-    int32 *TranposedDims = (int32 *)(Operands+1);
-    TranposedDims[0] = Dim1;
-    TranposedDims[1] = Dim2;
-    ResultTen.Header->DerivedOp.Operands = Operands;
-    ResultTen.Header->DerivedOp.OpContext = TranposedDims;
-
-    Free(AccessDims);
-    return ResultTen;
-}
-
-internal tensor32
-T32TransposeAll(tensor32 A, tensor32 ResultTen)
-{
-    Assert(ResultTen.Header->DType == A.Header->DType, "tensor type mismatch");
-    Assert(GetStorageSize(ResultTen.Header->Sizes, ResultTen.Header->Dim) == GetStorageSize(A.Header->Sizes, A.Header->Dim),
-           "tensor storage size mismatch");
-
-    uint32 *NewSizes = ResultTen.Header->Sizes;
-    uint32 *NewStrides = ResultTen.Header->Strides;
-    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
-    memcpy(NewStrides, A.Header->Strides, A.Header->Dim*sizeof(uint32));
-
-    // NOTE(Abid): Swap the sizes and strides
-    for(uint32 Idx = 0; Idx < A.Header->Dim; ++Idx)
-    {
-        NewSizes[Idx] = A.Header->Sizes[A.Header->Dim-Idx-1];
-        NewStrides[Idx] = A.Header->Strides[A.Header->Dim-Idx-1];
+#define __BIN_ELEMENTWISE_OP(A, B, Result, OP) \
+    /* NOTE(Abid): Assert here that result does match the highest dim and sizes (broadcast size as well) */ \
+    uint32 GreaterDim = 0; \
+    if (A.Header->Dim > B.Header->Dim) GreaterDim = A.Header->Dim; \
+    else GreaterDim = B.Header->Dim; \
+    Assert(Result.Header->Dim == GreaterDim, "result-operand(s) dimension mismatch"); \
+    for(uint32 Idx = 1; Idx <= GreaterDim; Idx++) { \
+        uint32 ASize = 0; \
+        uint32 BSize = 0; \
+        if((int32)(A.Header->Dim - Idx) >= 0) ASize = A.Header->Sizes[A.Header->Dim - Idx]; \
+        if((int32)(B.Header->Dim - Idx) >= 0) BSize = B.Header->Sizes[B.Header->Dim - Idx]; \
+        uint32 GreaterSize = ASize > BSize ? ASize : BSize; \
+        Assert(Result.Header->Sizes[Result.Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch"); \
+    } \
+    \
+    /* NOTE(Abid): Initialize variables */ \
+    int64 ResDataLeft = Result.Header->StorageNumElements; \
+    uintptr AOffset = 0; \
+    uintptr BOffset = 0; \
+    uintptr ResultOffset = 0; \
+    uint32 DimIdx = 1; \
+    \
+    memset(Result.Header->AccessSizes, 0, Result.Header->Dim*sizeof(uint32)); \
+    memset(A.Header->AccessSizes, 0, A.Header->Dim*sizeof(uint32)); \
+    memset(B.Header->AccessSizes, 0, B.Header->Dim*sizeof(uint32)); \
+    \
+    bin_op_dtypes OpDTypes = bin_op_dtypes_all_float; /* Assuming all float32 types initially. */ \
+    if(A.Header->DType == B.Header->DType) { if(A.Header->DType == dtype_int32) OpDTypes = 2; } \
+    else if(A.Header->DType == dtype_int32) { OpDTypes = 6; } /* A is int32, B is float32 */ \
+    else OpDTypes = 4; /* A is float32, B is int32 */ \
+    \
+    if(Result.Header->DType == dtype_int32) OpDTypes += 1; /* Determining the result data type */ \
+    \
+    switch(OpDTypes) { \
+        case bin_op_dtypes_all_float:       { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, float32, float32, float32, OP); } break; \
+        case bin_op_dtypes_float_float_int: { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, float32, float32, int32, OP);   } break; \
+        case bin_op_dtypes_int_int_float:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, int32, int32, float32, OP);     } break; \
+        case bin_op_dtypes_all_int:         { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, int32, int32, int32, OP);       } break; \
+        case bin_op_dtypes_float_int_float: { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, float32, int32, float32, OP);   } break; \
+        case bin_op_dtypes_float_int_int:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, float32, int32, int32, OP);     } break; \
+        case bin_op_dtypes_int_float_float: { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, int32, float32, float32, OP);   } break; \
+        case bin_op_dtypes_int_float_int:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, int32, float32, int32, OP);     } break; \
+        default:                            InvalidCodePath; \
     }
 
-    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
-    int32 AccessDimIdx = 0;
+typedef enum {
+    bin_op_dtypes_all_float = 0,
+    bin_op_dtypes_float_float_int = 1,
+    bin_op_dtypes_int_int_float = 2,
+    bin_op_dtypes_all_int = 3,
 
-    if (A.Header->DType == dtype_float32) { _TRANSPOSED_COPY_TENSOR_DTYPE(float32) }
-    else if (A.Header->DType == dtype_int32) { _TRANSPOSED_COPY_TENSOR_DTYPE(int32) }
-    else Assert(0, "invalid code path");
+    bin_op_dtypes_float_int_float = 4,
+    bin_op_dtypes_float_int_int = 5,
+    bin_op_dtypes_int_float_float = 6,
+    bin_op_dtypes_int_float_int = 7,
+} bin_op_dtypes;
+internal void T32Add(tensor32 A, tensor32 B, tensor32 Result) { __BIN_ELEMENTWISE_OP(A, B, Result, +); }
+internal void T32Sub(tensor32 A, tensor32 B, tensor32 Result) { __BIN_ELEMENTWISE_OP(A, B, Result, -); }
+internal void T32Mul(tensor32 A, tensor32 B, tensor32 Result) { __BIN_ELEMENTWISE_OP(A, B, Result, *); }
+internal void T32Div(tensor32 A, tensor32 B, tensor32 Result) { __BIN_ELEMENTWISE_OP(A, B, Result, /); }
+#undef __BIN_ELEMENTWISE_OP_DTYPE
+#undef __BIN_ELEMENTWISE_OP
 
-    // NOTE(Abid): Add information for backpropagation
-    ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranposeAll;
-    tensor32 *Operands = ResultTen.Header->DerivedOp.Operands;
-    Operands[0] = A;
-    ResultTen.Header->DerivedOp.Operands = Operands;
-
-    Free(AccessDims);
-    return ResultTen;
-}
+// NOTE(Abid): 2. Main routines for MatMul operation
 
 #if 0
 internal tensor_i32
@@ -838,7 +533,11 @@ I32TenMatMul(tensor_i32 A, tensor_i32 B)
     Free(AccessDims);
     return ResultTen;
 }
+#endif
 
+// NOTE(Abid): 3. Main routines for Unary operations
+
+#if 0
 internal tensor_i32
 I32TenNeg(tensor_i32 A)
 {
@@ -896,3 +595,149 @@ I32TenNeg(tensor_i32 A)
     return Result;
 }
 #endif
+
+// =======================================
+// NOTE(Abid): Reshaping Operations
+// =======================================
+
+// TODO(Abid): Must take care of non-contiguous tensors, especially when flattening
+#define _TRANSPOSED_COPY_TENSOR_DTYPE(DTYPE) \
+    while(AccessDimIdx >= 0) \
+    { \
+        /* NOTE(Abid): Check if we are in outer dim and then update */ \
+        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-1); \
+        if(IsOuterDim) \
+        { \
+            /* NOTE(Abid): In case we have reached the end of this dimension */ \
+            if(AccessDims[AccessDimIdx] == NewSizes[AccessDimIdx]) \
+            { \
+                AccessDims[AccessDimIdx--] = 0; \
+                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
+            } \
+            else ++AccessDimIdx; \
+        } \
+        else \
+        { \
+            uint32 ATenOuterDimOffset = 0; \
+            uint32 ResultOuterDimOffset = 0; \
+            for(uint32 Idx = 0; Idx < A.Header->Dim-1; ++Idx) \
+            { \
+                ATenOuterDimOffset += AccessDims[Idx] * NewStrides[Idx]; \
+                ResultOuterDimOffset += AccessDims[Idx] * ResultTen.Header->Strides[Idx]; \
+            } \
+            for(uint32 Idx = 0; Idx < NewSizes[AccessDimIdx]; ++Idx) \
+            { \
+                ((DTYPE *)ResultTen.Data)[ResultOuterDimOffset] = ((DTYPE *)A.Data)[ATenOuterDimOffset]; \
+                ATenOuterDimOffset += NewStrides[AccessDimIdx]; \
+                ResultOuterDimOffset += ResultTen.Header->Strides[AccessDimIdx]; \
+            } \
+            \
+            AccessDims[AccessDimIdx--] = 0; \
+            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx]; \
+        } \
+    }
+
+internal void
+T32TransposeInPlace(tensor32 A, int32 Dim1, int32 Dim2)
+{
+    // TODO(Abid): Properly check if the transpose could make the tensor contiguous again.
+    Assert(A.Header->IsContiguous, "cannot transpose non-contiguous tensor");
+
+    // NOTE(Abid): Support for negative indexing.
+    Dim1 = (A.Header->Dim + Dim1) % A.Header->Dim;
+    Dim2 = (A.Header->Dim + Dim2) % A.Header->Dim;
+
+    Assert(((int32)A.Header->Dim >= Dim1) && ((int32)A.Header->Dim >= Dim2), "dimension index out of bounds");
+
+    // NOTE(Abid): Swap the sizes and strides
+    uint32 Temp = A.Header->Sizes[Dim1];
+    A.Header->Sizes[Dim1] = A.Header->Sizes[Dim2];
+    A.Header->Sizes[Dim2] = Temp;
+    Temp = A.Header->Strides[Dim1];
+    A.Header->Strides[Dim1] = A.Header->Strides[Dim2];
+    A.Header->Strides[Dim2] = Temp;
+
+    A.Header->IsContiguous = false;
+}
+
+internal tensor32
+T32Transpose(tensor32 A, int32 Dim1, int32 Dim2, tensor32 ResultTen)
+{
+    // NOTE(Abid): Support for negative indexing.
+    Dim1 = (A.Header->Dim + Dim1) % A.Header->Dim;
+    Dim2 = (A.Header->Dim + Dim2) % A.Header->Dim;
+
+    Assert(ResultTen.Header->DType == A.Header->DType, "tensor type mismatch");
+    Assert(ResultTen.Header->StorageNumElements == A.Header->StorageNumElements, "tensor storage size mismatch");
+    Assert(Dim1 != Dim2, "incorrect dimensions for transpose; select two different dimensions");
+    Assert(((int32)A.Header->Dim >= Dim1) && ((int32)A.Header->Dim >= Dim2),
+           "dimension index out of bounds");
+
+    uint32 *NewSizes = ResultTen.Header->Sizes;
+    uint32 *NewStrides = ResultTen.Header->Strides;
+    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
+    memcpy(NewStrides, A.Header->Strides, A.Header->Dim*sizeof(uint32));
+
+    // NOTE(Abid): Swap the sizes and strides
+    NewSizes[Dim1] = A.Header->Sizes[Dim2];
+    NewSizes[Dim2] = A.Header->Sizes[Dim1];
+    NewStrides[Dim1] = A.Header->Strides[Dim2];
+    NewStrides[Dim2] = A.Header->Strides[Dim1];
+
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
+    int32 AccessDimIdx = 0;
+
+    // Copy the tensor to the new one based on DType
+    if (A.Header->DType == dtype_float32) { _TRANSPOSED_COPY_TENSOR_DTYPE(float32) }
+    else if (A.Header->DType == dtype_int32) { _TRANSPOSED_COPY_TENSOR_DTYPE(int32) }
+    else Assert(0, "invalid code path");
+
+    // NOTE(Abid): Add information for backpropagation
+    ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranpose;
+    tensor32 *Operands = ResultTen.Header->DerivedOp.Operands;
+    Operands[0] = A;
+    int32 *TranposedDims = (int32 *)(Operands+1);
+    TranposedDims[0] = Dim1;
+    TranposedDims[1] = Dim2;
+    ResultTen.Header->DerivedOp.Operands = Operands;
+    ResultTen.Header->DerivedOp.OpContext = TranposedDims;
+
+    Free(AccessDims);
+    return ResultTen;
+}
+
+internal tensor32
+T32TransposeAll(tensor32 A, tensor32 ResultTen)
+{
+    Assert(ResultTen.Header->DType == A.Header->DType, "tensor type mismatch");
+    Assert(GetStorageSize(ResultTen.Header->Sizes, ResultTen.Header->Dim) == GetStorageSize(A.Header->Sizes, A.Header->Dim),
+           "tensor storage size mismatch");
+
+    uint32 *NewSizes = ResultTen.Header->Sizes;
+    uint32 *NewStrides = ResultTen.Header->Strides;
+    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
+    memcpy(NewStrides, A.Header->Strides, A.Header->Dim*sizeof(uint32));
+
+    // NOTE(Abid): Swap the sizes and strides
+    for(uint32 Idx = 0; Idx < A.Header->Dim; ++Idx)
+    {
+        NewSizes[Idx] = A.Header->Sizes[A.Header->Dim-Idx-1];
+        NewStrides[Idx] = A.Header->Strides[A.Header->Dim-Idx-1];
+    }
+
+    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
+    int32 AccessDimIdx = 0;
+
+    if (A.Header->DType == dtype_float32) { _TRANSPOSED_COPY_TENSOR_DTYPE(float32) }
+    else if (A.Header->DType == dtype_int32) { _TRANSPOSED_COPY_TENSOR_DTYPE(int32) }
+    else Assert(0, "invalid code path");
+
+    // NOTE(Abid): Add information for backpropagation
+    ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranposeAll;
+    tensor32 *Operands = ResultTen.Header->DerivedOp.Operands;
+    Operands[0] = A;
+    ResultTen.Header->DerivedOp.Operands = Operands;
+
+    Free(AccessDims);
+    return ResultTen;
+}

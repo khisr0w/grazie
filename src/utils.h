@@ -8,8 +8,17 @@
 
 #if !defined(UTILS_H)
 
+#ifdef GRAZIE_DEBUG
+#define Assert(Expr, ErrorStr) if(!(Expr)) { *(int32 *)0 = 0; }
+#else
 #define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", __FILE__, __LINE__); exit(-1);}
-#define InvalidCodePath() *(int *)0 = 0
+#endif
+
+#ifdef GRAZIE_DEBUG
+#define InvalidCodePath *(int *)0 = 0
+#else
+#define InvalidCodePath do { fprintf(stderr, "Invalid Path (%s:%d): \nExiting...\n", __FILE__, __LINE__); exit(-1); } while(0)
+#endif
 
 
 #define ArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
