@@ -346,10 +346,10 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
     }
 }
 
+/* TODO(Abid): For optimization, if the tensor is contiguous, then the next element is just +1, thefore, we can
+ *             run a for loop instead of calculating the next element each time, this will work since for shape=1,
+ *             the stride will be zero. */
 #define __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, A_DTYPE, B_DTYPE, R_DTYPE, OP) \
-    /* TODO(Abid): For optimizing this routine, check if we are in a broadcastable dim, then take the
-                   value that we must broadcast, and then run a for loop continuously operating it until
-                   the end of this dim. */ \
     while(ResDataLeft >= 0) { \
         *((R_DTYPE *)Result.Data + ResultOffset) = (R_DTYPE)(*((A_DTYPE *)A.Data + AOffset) OP *((B_DTYPE *)B.Data + BOffset)); \
         int32 ACurrentDim = (int32)A.Header->Dim - DimIdx; \
@@ -374,6 +374,10 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
         uint32 BSize = 0; \
         if((int32)(A.Header->Dim - Idx) >= 0) ASize = A.Header->Sizes[A.Header->Dim - Idx]; \
         if((int32)(B.Header->Dim - Idx) >= 0) BSize = B.Header->Sizes[B.Header->Dim - Idx]; \
+        /* NOTE(Abid): Check for shape alignment for the operands */ \
+        Assert(((ASize > BSize) && ((BSize == 1) || (BSize == 0))) || \
+               ((BSize > ASize) && ((ASize == 1) || (ASize == 0))) || \
+               (BSize == ASize), "operand(s) shape mismatch"); \
         uint32 GreaterSize = ASize > BSize ? ASize : BSize; \
         Assert(Result.Header->Sizes[Result.Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch"); \
     } \
@@ -426,117 +430,193 @@ internal void T32Div(tensor32 A, tensor32 B, tensor32 Result) { __BIN_ELEMENTWIS
 #undef __BIN_ELEMENTWISE_OP_DTYPE
 #undef __BIN_ELEMENTWISE_OP
 
+internal inline uint32
+GetIndex(uint32 Dim, int32 Index)
+{
+    int32 Result = (int32)Dim + Index;
+    if(Result < 0) Result = 0;
+    Assert(Result < (int32)(2*Dim), "index out of bounds");
+    return Result % Dim;
+}
+
 // NOTE(Abid): 2. Main routines for MatMul operation
 
-#if 0
-internal tensor_i32
-I32TenMatMul(tensor_i32 A, tensor_i32 B)
-{
-    Assert(A.Header->Dim == B.Header->Dim, "dimension mismatch for MatMul operation");
-    Assert((A.Header->Dim != 0) && (B.Header->Dim != 0), "dimension must be non-zero")
-    // NOTE(Abid): check if shape is appropriate
-    if(A.Header->Dim >= 2)
-    {
-        uint32 MatMulOutDimLastIdx = A.Header->Dim-2;
-        //NOTE(Abid): Outer dim check
-        for(uint32 Idx = 0; Idx < MatMulOutDimLastIdx; ++Idx)
-            Assert(A.Header->Sizes[Idx] == B.Header->Sizes[Idx], "outer shape mismatch for MatMul operation");
+// TODO(Abid): Improve this routine by reshaping all operand tensors to be the same dim (expanding all with shape 1) and stride 0.
+//             For now, let's just do a simple hack with a few conditionals.
+internal void 
+T32MatMul(tensor32 A, tensor32 B, tensor32 Result) {
+    // NOTE(Abid): Assert greater dim is the same as the result tensors' dim
+    uint32 GreaterDim = 0;
+    uint32 LesserDim = 0;
+    uint32 ResLastBroadDim = 0;
 
-        //NOTE(Abid): MatMul dim check
-        Assert(A.Header->Sizes[MatMulOutDimLastIdx+1] == B.Header->Sizes[A.Header->Dim-2],
-               "inner shape mismatch for MatMul operation");
+    if (A.Header->Dim > B.Header->Dim) { GreaterDim = A.Header->Dim; LesserDim = B.Header->Dim; }
+    else { GreaterDim = B.Header->Dim; LesserDim = A.Header->Dim; }
+    if(LesserDim > 1) ResLastBroadDim = 3;
+    else ResLastBroadDim = 2;
+    Assert(Result.Header->Dim == GreaterDim, "result-operand(s) dimension mismatch");
+
+    uint32 ALastIdx = GetIndex(A.Header->Dim, -1);
+    uint32 ASecondLastIdx = GetIndex(A.Header->Dim, -2);
+
+    uint32 BLastIdx = GetIndex(B.Header->Dim, -1);
+    uint32 BSecondLastIdx = GetIndex(B.Header->Dim, -2);
+    /* NOTE(Abid): Assert here the tensor operand(s) can be matrix-multiplied */
+    Assert(A.Header->Sizes[ALastIdx] == B.Header->Sizes[BSecondLastIdx],
+           "operand(s) shape mismatch for MatMul operation");
+
+    // NOTE(Abid): Assert the shapes of the result tensor match with the MatMul operation's required shape.
+    //             1. In case, the lesserDim is 1, then we expect the last dimension of result to be 1 as well
+    //             2. Otherwise, the dimensions must match with the result of the MatMul operation.
+    Assert(((LesserDim > 1) && (
+                                    (A.Header->Sizes[GetIndex(A.Header->Dim, -2)] ==
+                                     Result.Header->Sizes[GetIndex(Result.Header->Dim, -2)]) &&
+                                    (B.Header->Sizes[GetIndex(B.Header->Dim, -1)] ==
+                                     Result.Header->Sizes[GetIndex(Result.Header->Dim, -1)])
+                               )
+           ) || ((LesserDim == 1) && (B.Header->Dim == 1 ? Result.Header->Sizes[GetIndex(Result.Header->Dim, - 1)] == 1 :
+                                                           Result.Header->Sizes[GetIndex(Result.Header->Dim, - 2)] == 1)),
+           "result-operand(s) shape mismatch for MatMul operation");
+
+    // NOTE(Abid): Assert broadcast shape match
+    for(uint32 Idx = 3; Idx <= GreaterDim; ++Idx) {
+        uint32 ASize = 0; uint32 BSize = 0;
+        if((int32)(A.Header->Dim - Idx) >= 0) ASize = A.Header->Sizes[A.Header->Dim - Idx];
+        if((int32)(B.Header->Dim - Idx) >= 0) BSize = B.Header->Sizes[B.Header->Dim - Idx];
+        /* NOTE(Abid): Check for shape alignment for the operands */
+        boolean IsAGreater = ASize > BSize;
+        Assert((IsAGreater && ((BSize == 1) || (BSize == 0))) ||
+               ((BSize > ASize) && ((ASize == 1) || (ASize == 0))) ||
+               (BSize == ASize), "operand(s) shape mismatch");
+        uint32 GreaterSize = IsAGreater ? ASize : BSize;
+        Assert(Result.Header->Sizes[Result.Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch");
     }
-    else
-    {
-        // NOTE(Abid): In case of 1-dimensional tensors
-        Assert((A.Header->Dim == 1) && (A.Header->Sizes[0] == B.Header->Sizes[0]),
-               "inner shape mismatch for MatMul operation");
-    }
 
-    // WARNING(Abid): Don't do memory allocation during this call, it ain't nice
-    uint32 *NewSizes = (uint32 *)Malloc(A.Header->Dim*sizeof(uint32));
-    memcpy(NewSizes, A.Header->Sizes, A.Header->Dim*sizeof(uint32));
-    NewSizes[A.Header->Dim-1] = B.Header->Sizes[B.Header->Dim-1];
+    /* NOTE(Abid): Initialize variables */
+    int64 ResDataLeft = Result.Header->StorageNumElements;
+    uintptr AOffset = 0;
+    uintptr BOffset = 0;
+    uintptr ResultOffset = 0;
 
-    tensor_i32 ResultTen = _I32Tensor(NewSizes, A.Header->Dim, 0, 0, false);
+    memset(Result.Header->AccessSizes, 0, Result.Header->Dim*sizeof(uint32));
+    memset(A.Header->AccessSizes, 0, A.Header->Dim*sizeof(uint32));
+    memset(B.Header->AccessSizes, 0, B.Header->Dim*sizeof(uint32));
 
-    // NOTE(Abid): Should we compute the grad in the backward case, or not.
-    if(!IS_GRAD_PRESERVE()) ResultTen.Header->ShouldGrad = false;
+    int32 IsBroadcastDim = false; // Last if we count from the right
+    while(ResDataLeft) {
+        // NOTE(Abid): We are progressing row-wise on the result tensor
+        float32 DotResult = 0;
+        for(uint32 Idx = 0; Idx < A.Header->Sizes[ALastIdx]; ++Idx) {
+            DotResult += (float32)(*((float32 *)A.Data + AOffset) * *((float32 *)B.Data + BOffset));
 
-    uint32 *AccessDims = (uint32 *)Calloc(A.Header->Dim, sizeof(uint32));
-    int32 AccessDimIdx = 0;
-
-    while(AccessDimIdx >= 0)
-    {
-        // NOTE(Abid): Check if we are in outer dim and then update
-        boolean IsOuterDim = AccessDimIdx < (int32)(A.Header->Dim-2);
-        if(IsOuterDim)
-        {
-            // NOTE(Abid): In case we have reached the end of this dimension
-            if(AccessDims[AccessDimIdx] == A.Header->Sizes[AccessDimIdx])
-            {
-                AccessDims[AccessDimIdx--] = 0;
-                if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
-            }
-            else ++AccessDimIdx;
+            AOffset += A.Header->Strides[ALastIdx];
+            BOffset += B.Header->Strides[BSecondLastIdx];
         }
-        else
-        {
-            size_t ATenOuterDimOffset = 0;
-            size_t BTenOuterDimOffset = 0;
-            size_t ResultOuterDimOffset = 0;
+        *((float32 *)Result.Data + ResultOffset) = DotResult;
+        ++Result.Header->AccessSizes[Result.Header->Dim-1];
 
-            // NOTE(Abid): Offset until the start of the inner dimension
-            for(uint32 Idx = 0; Idx < A.Header->Dim-2; ++Idx)
-            {
-                ATenOuterDimOffset += AccessDims[Idx] * A.Header->Strides[Idx];
-                BTenOuterDimOffset += AccessDims[Idx] * B.Header->Strides[Idx];
-                ResultOuterDimOffset += AccessDims[Idx] * ResultTen.Header->Strides[Idx];
-            }
+        AOffset -= A.Header->Strides[ALastIdx]*A.Header->Sizes[ALastIdx];
+        BOffset -= B.Header->Strides[BSecondLastIdx]*B.Header->Sizes[BSecondLastIdx];
+        if(--ResDataLeft == 0) break;
 
-            // TODO(Abid): Implement the case where its a 1-dimensional matrix
-            uint32 CollapsedInnerDim = A.Header->Sizes[A.Header->Dim-1];
-            for(uint32 ColIdx = 0; ColIdx < B.Header->Sizes[B.Header->Dim-1]; ++ColIdx)
-            {
-                size_t BTenOffset = BTenOuterDimOffset + ColIdx*B.Header->Strides[A.Header->Dim-1];
-                
-                for(uint32 RowIdx = 0; RowIdx < A.Header->Sizes[A.Header->Dim-2]; ++RowIdx)
-                {
-                    size_t ATenOffset = ATenOuterDimOffset + RowIdx*A.Header->Strides[A.Header->Dim-2];
-                    size_t ResultOffset = ColIdx * ResultTen.Header->Strides[ResultTen.Header->Dim-1] +
-                                          RowIdx * ResultTen.Header->Strides[ResultTen.Header->Dim-2];
-                    int32 Result = 0;
-                    for(uint32 Idx = 0; Idx < CollapsedInnerDim; ++Idx)
-                    {
-                        int32 AVal = A.Data[ATenOffset + Idx*A.Header->Strides[A.Header->Dim-1]];
-                        int32 BVal = B.Data[BTenOffset + Idx*B.Header->Strides[B.Header->Dim-2]];
-                        Result += AVal*BVal;
-                    }
-                    ResultTen.Data[ResultOuterDimOffset + ResultOffset] = Result;
+        // NOTE(Abid): If Result dim = 1, then it won't go beyond this point.
+        // NOTE(Abid): In case we have reached the end of the result tensor row
+        if(Result.Header->AccessSizes[Result.Header->Dim-1] == Result.Header->Sizes[Result.Header->Dim-1]) {
+            ResultOffset -= Result.Header->Strides[Result.Header->Dim-1]*(Result.Header->Sizes[Result.Header->Dim-1]-1);
+            Result.Header->AccessSizes[Result.Header->Dim-1] = 0;
+
+            if(ResLastBroadDim > 2) {
+                ++Result.Header->AccessSizes[Result.Header->Dim-2];
+                if(Result.Header->AccessSizes[Result.Header->Dim-2] == Result.Header->Sizes[Result.Header->Dim-2]) {
+                    // NOTE(Abid): We've reached the end, begin broadcast semantics for matrix...
+                    IsBroadcastDim = true;
+
+                    // NOTE(Abid): Zero out matrix multiplication dimensions, and take offsets to the start.
+                    AOffset -= A.Header->Strides[ASecondLastIdx]*(A.Header->Sizes[ASecondLastIdx]-1);
+                    A.Header->AccessSizes[ALastIdx] = 0; A.Header->AccessSizes[ASecondLastIdx] = 0;
+
+                    BOffset -= B.Header->Strides[BLastIdx]*(B.Header->Sizes[BLastIdx]-1);
+                    B.Header->AccessSizes[BLastIdx] = 0; B.Header->AccessSizes[BSecondLastIdx] = 0;
+
+                    Result.Header->AccessSizes[Result.Header->Dim - (ResLastBroadDim-1)] = 0;
+                    ResultOffset -= Result.Header->Strides[Result.Header->Dim-2]*(Result.Header->Sizes[Result.Header->Dim-2]-1);
+                } else {
+                    AOffset += A.Header->Strides[ASecondLastIdx]; // Going to the next column element (start of next row).
+                    BOffset -= B.Header->Strides[BLastIdx]*(B.Header->Sizes[BLastIdx]-1);
+                    ResultOffset += Result.Header->Strides[Result.Header->Dim-2];
                 }
             }
+            else {
+                // NOTE(Abid): Result has only 1 matmul dimension, the rest is for broadcast.
+                IsBroadcastDim = true;
 
-            // NOTE(Abid): Go to the previous dimension while setting this one to zero
-            AccessDims[AccessDimIdx--] = 0;
-            if(AccessDimIdx != -1) ++AccessDims[AccessDimIdx];
+                if(A.Header->Dim > B.Header->Dim) {
+                    // NOTE(Abid): BOffset needs to be zero'd out
+                    AOffset -= A.Header->Strides[ASecondLastIdx]*(A.Header->Sizes[ASecondLastIdx]-2);
+                    A.Header->AccessSizes[ALastIdx] = 0; A.Header->AccessSizes[ASecondLastIdx] = 0;
+                    BOffset = 0;
+                } else {
+                    // NOTE(Abid): AOffset needs to be zero'd out
+                    BOffset -= B.Header->Strides[BLastIdx]*(B.Header->Sizes[BLastIdx]-2);
+                    B.Header->AccessSizes[BLastIdx] = 0; B.Header->AccessSizes[BSecondLastIdx] = 0;
+                    AOffset = 0;
+                }
+
+
+                Result.Header->AccessSizes[Result.Header->Dim - (ResLastBroadDim-1)] = 0;
+            }
+        } else {
+            BOffset += B.Header->Strides[B.Header->Dim-1]; // Going to the next row element (start of next column).
+            ResultOffset += Result.Header->Strides[Result.Header->Dim-1];
+        }
+
+        if(IsBroadcastDim) {
+            for(uint32 CurrentBroadIter = 0; CurrentBroadIter < ResLastBroadDim; ++CurrentBroadIter) {
+                int32 CurrenntDimIdx = ResLastBroadDim + CurrentBroadIter;
+                int32 CurResBroadIdx = (int32)Result.Header->Dim - CurrenntDimIdx;
+                int32 CurABroadIdx = (int32)A.Header->Dim - CurrenntDimIdx;
+                int32 CurBBroadIdx = (int32)B.Header->Dim - CurrenntDimIdx;
+
+                if(Result.Header->AccessSizes[CurResBroadIdx]+1 ==
+                   Result.Header->Sizes[CurResBroadIdx]) {
+                    // NOTE(Abid): We are at the end of this broadcast dimension
+                    Result.Header->AccessSizes[CurResBroadIdx] = 0;
+                    ResultOffset -= Result.Header->Strides[CurResBroadIdx]*Result.Header->Sizes[CurResBroadIdx];
+                    if(CurABroadIdx >= 0) {
+                        A.Header->AccessSizes[CurABroadIdx] = 0;
+                        AOffset -= A.Header->Strides[CurABroadIdx]*A.Header->Sizes[CurABroadIdx];
+                    } else {
+                        memset(A.Header->AccessSizes, 0, A.Header->Dim*sizeof(uint32));
+                        AOffset = 0;
+                    }
+                    if(CurBBroadIdx >= 0) {
+                        B.Header->AccessSizes[CurBBroadIdx] = 0;
+                        BOffset -= B.Header->Strides[CurBBroadIdx]*B.Header->Sizes[CurBBroadIdx];
+                    } else {
+                        memset(A.Header->AccessSizes, 0, A.Header->Dim*sizeof(uint32));
+                        BOffset = 0;
+                    }
+                } else {
+                    ++Result.Header->AccessSizes[CurResBroadIdx];
+                    ResultOffset += Result.Header->Strides[CurResBroadIdx];
+                    if(CurABroadIdx >= 0) {
+                        ++A.Header->AccessSizes[CurABroadIdx];
+                        AOffset += A.Header->Strides[CurABroadIdx];
+                    }
+                    if(CurBBroadIdx >= 0) {
+                        ++B.Header->AccessSizes[CurBBroadIdx];
+                        BOffset += B.Header->Strides[CurBBroadIdx];
+                    }
+                    break;
+                }
+            }
+            IsBroadcastDim = false;
         }
     }
-
-    // NOTE(Abid): Add information for backpropagation
-    ResultTen.Header->DerivedOp.TensorOp = op_BinaryMatmul;
-    tensor_i32 *Operands = ResultTen.Header->DerivedOp.Operands;
-    Operands[0] = A;
-    Operands[1] = B;
-    ResultTen.Header->DerivedOp.Operands = Operands;
-
-    Free(NewSizes);
-    Free(AccessDims);
-    return ResultTen;
 }
-#endif
 
 // NOTE(Abid): 3. Main routines for Unary operations
-
+// TODO(Abid): Implement T32ElementSet() and T32ElementOp here
 #if 0
 internal tensor_i32
 I32TenNeg(tensor_i32 A)
@@ -660,6 +740,7 @@ T32TransposeInPlace(tensor32 A, int32 Dim1, int32 Dim2)
     A.Header->IsContiguous = false;
 }
 
+#if 0
 internal tensor32
 T32Transpose(tensor32 A, int32 Dim1, int32 Dim2, tensor32 ResultTen)
 {
@@ -741,3 +822,4 @@ T32TransposeAll(tensor32 A, tensor32 ResultTen)
     Free(AccessDims);
     return ResultTen;
 }
+#endif

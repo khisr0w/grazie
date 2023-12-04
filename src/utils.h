@@ -9,7 +9,7 @@
 #if !defined(UTILS_H)
 
 #ifdef GRAZIE_DEBUG
-#define Assert(Expr, ErrorStr) if(!(Expr)) { *(int32 *)0 = 0; }
+#define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\n", __FILE__, __LINE__); *(int32 *)0 = 0; }
 #else
 #define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", __FILE__, __LINE__); exit(-1);}
 #endif

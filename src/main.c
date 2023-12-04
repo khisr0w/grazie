@@ -25,14 +25,18 @@
 int main()
 {
     tensor32 Ten1 = TensorFromArrayLiteral(Ten1, float32,
-                                           SHAPE(2, 1, 3),
-                                           ARRAY(-2.4f, 1.43f, 5.8f,
+                                           SHAPE(2, 2, 2),
+                                           ARRAY(-2.4f, 1.43f,
+                                                 5.8f,  1.7f,
 
-                                                 -3.4f, 2.43f, 6.8f));
+                                                 12.14f, -3.4f,
+                                                 2.43f, 6.8f));
 
-    tensor32 Ten2 = TensorFromArrayLiteral(Ten2, int32,
-                                           SHAPE(2, 3),
+    tensor32 Ten2 = TensorFromArrayLiteral(Ten2, float32,
+                                           SHAPE(2, 2, 3),
                                            ARRAY(-1, 4, 3,
+                                                  2, 7, 5,
+                                                  -1, 4, 3,
                                                   2, 7, 5));
 #if 0
     // NOTE(Abid): Test for when one of the dimension is 1
@@ -69,11 +73,12 @@ int main()
     PrintTensor32(ResultAdd);
 #endif
 
-    uint32 Shape1[] = {2, 3};
-    tensor32 Result = T32Empty(Shape1, int32);
-    T32Transpose(Ten2, 0, -1, Result);
-    T32TransposeInPlace(Ten2, 0, -1);
-    PrintTensor32(Ten2);
+    uint32 Shape1[] = {2, 2, 3};
+    tensor32 Result = T32Empty(Shape1, float32);
+    // T32Transpose(Ten2, 0, -1, Result);
+    // T32Add(Ten1, Ten2, Result);
+    T32MatMul(Ten1, Ten2, Result);
+    PrintTensor32(Result);
 
 #if 0
     printf("Grad before setting it: \n");
