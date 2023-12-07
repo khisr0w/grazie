@@ -31,6 +31,8 @@ typedef enum
 
     op_BinaryMatmul,
 
+    op_ReduceSumAll,
+
 } tensor_op;
 
 typedef enum
@@ -51,7 +53,7 @@ typedef struct tensor32 tensor32;
 typedef struct
 {
     tensor_op TensorOp;
-    tensor32 *Operands;
+    tensor32 **Operands;
 
     // NOTE(Abid): This is used for storing context data related to operations,
     //             One of the main uses is to store the dimensions that transposed.
@@ -65,27 +67,31 @@ typedef struct
     uint32 Dim;
     uint32 Offset;
 
-    uint32 *AccessSizes; // NOTE(Abid): This is stricly for optimizing math ops.
+    // NOTE(Abid): This is stricly for optimizing math ops, so we don't allocate.
+    uint32 *AccessSizes; 
     size_t StorageNumElements;
 
     // boolean IsPersist;
     boolean ShouldGrad;
-    boolean GradStorageInit;
-
     boolean IsContiguous;
-
-    tensor_dtype DType;
 
     op_info DerivedOp;
 } tensor_header;
+
+typedef struct {
+
+    void *Ptr;
+    tensor_dtype DType;
+} storage;
 
 struct tensor32
 {
     tensor_header *Header;
 
-    void *Data;
-    void *Grad;
+    storage Data;
+    storage Grad;
 };
+
 
 #define TENSOR_H
 #endif
