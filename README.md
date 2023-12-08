@@ -53,6 +53,9 @@ int main() {
     return(0);
 }
 ```
+Result:
+
+![Alt text](doc/ex_1.png "Result")
 
 #### Matrix Multiplication
 ```C
@@ -80,6 +83,9 @@ int main() {
     return(0);
 }
 ```
+Result:
+
+![Alt text](doc/ex_2.png "Result")
 
 #### Gradient Calculationa and Backpropagation
 ```C
@@ -126,3 +132,6 @@ int main() {
     return(0)
 }
 ```
+Result:
+
+![Alt text](doc/ex_3.png "Result")
