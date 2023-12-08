@@ -452,7 +452,7 @@ GetIndex(uint32 Dim, int32 Index)
             AOffset += A->Header->Strides[ALastIdx]; \
             BOffset += B->Header->Strides[BSecondLastIdx]; \
         } \
-        *((R_DTYPE *)Result->Data.Ptr + ResultOffset) = (R_DTYPE)DotResult; \
+        *((R_DTYPE *)Result->Data.Ptr + ResultOffset) OP (R_DTYPE)DotResult; \
         ++Result->Header->AccessSizes[Result->Header->Dim-1]; \
         \
         AOffset -= A->Header->Strides[ALastIdx]*A->Header->Sizes[ALastIdx]; \
@@ -552,6 +552,7 @@ GetIndex(uint32 Dim, int32 Index)
         } \
     }
 
+/* TODO(Abid): This really needs to be refactored */
 internal void 
 T32MatMul(tensor32 *A, tensor32 *B, tensor32 *Result) {
     // NOTE(Abid): Assert greater dim is the same as the result tensors' dim
@@ -624,19 +625,102 @@ T32MatMul(tensor32 *A, tensor32 *B, tensor32 *Result) {
     if(Result->Data.DType == dtype_int32) OpDTypes += 1; /* Determining the result data type */
 
     switch(OpDTypes) {
-        case bin_op_dtypes_all_float:       { __BIN_MATMUL_DTYPE(A, B, Result, float32, float32, float32, OP); } break;
-        case bin_op_dtypes_float_float_int: { __BIN_MATMUL_DTYPE(A, B, Result, float32, float32, int32, OP);   } break;
-        case bin_op_dtypes_int_int_float:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, int32, float32, OP);     } break;
-        case bin_op_dtypes_all_int:         { __BIN_MATMUL_DTYPE(A, B, Result, int32, int32, int32, OP);       } break;
-        case bin_op_dtypes_float_int_float: { __BIN_MATMUL_DTYPE(A, B, Result, float32, int32, float32, OP);   } break;
-        case bin_op_dtypes_float_int_int:   { __BIN_MATMUL_DTYPE(A, B, Result, float32, int32, int32, OP);     } break;
-        case bin_op_dtypes_int_float_float: { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, float32, OP);   } break;
-        case bin_op_dtypes_int_float_int:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, int32, OP);     } break;
+        case bin_op_dtypes_all_float:       { __BIN_MATMUL_DTYPE(A, B, Result, float32, float32, float32, =); } break;
+        case bin_op_dtypes_float_float_int: { __BIN_MATMUL_DTYPE(A, B, Result, float32, float32, int32, =);   } break;
+        case bin_op_dtypes_int_int_float:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, int32, float32, =);     } break;
+        case bin_op_dtypes_all_int:         { __BIN_MATMUL_DTYPE(A, B, Result, int32, int32, int32, =);       } break;
+        case bin_op_dtypes_float_int_float: { __BIN_MATMUL_DTYPE(A, B, Result, float32, int32, float32, =);   } break;
+        case bin_op_dtypes_float_int_int:   { __BIN_MATMUL_DTYPE(A, B, Result, float32, int32, int32, =);     } break;
+        case bin_op_dtypes_int_float_float: { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, float32, =);   } break;
+        case bin_op_dtypes_int_float_int:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, int32, =);     } break;
+        default:                            InvalidCodePath;
+    }
+}
+
+internal void
+__T32MatMulAccumulate(tensor32 *A, tensor32 *B, tensor32 *Result) {
+    // NOTE(Abid): Assert greater dim is the same as the result tensors' dim
+    uint32 GreaterDim = 0;
+    uint32 LesserDim = 0;
+    uint32 ResLastBroadDim = 0;
+
+    if (A->Header->Dim > B->Header->Dim) { GreaterDim = A->Header->Dim; LesserDim = B->Header->Dim; }
+    else { GreaterDim = B->Header->Dim; LesserDim = A->Header->Dim; }
+    if(LesserDim > 1) ResLastBroadDim = 3;
+    else ResLastBroadDim = 2;
+    Assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch");
+
+    uint32 ALastIdx = GetIndex(A->Header->Dim, -1);
+    uint32 ASecondLastIdx = GetIndex(A->Header->Dim, -2);
+
+    uint32 BLastIdx = GetIndex(B->Header->Dim, -1);
+    uint32 BSecondLastIdx = GetIndex(B->Header->Dim, -2);
+    /* NOTE(Abid): Assert here the tensor operand(s) can be matrix-multiplied */
+    Assert(A->Header->Sizes[ALastIdx] == B->Header->Sizes[BSecondLastIdx],
+           "operand(s) shape mismatch for MatMul operation");
+
+    // NOTE(Abid): Assert the shapes of the result tensor match with the MatMul operation's required shape.
+    //             1. In case, the lesserDim is 1, then we expect the last dimension of result to be 1 as well
+    //             2. Otherwise, the dimensions must match with the result of the MatMul operation.
+    Assert(((LesserDim > 1) && (
+                                    (A->Header->Sizes[GetIndex(A->Header->Dim, -2)] ==
+                                     Result->Header->Sizes[GetIndex(Result->Header->Dim, -2)]) &&
+                                    (B->Header->Sizes[GetIndex(B->Header->Dim, -1)] ==
+                                     Result->Header->Sizes[GetIndex(Result->Header->Dim, -1)])
+                               )
+           ) || ((LesserDim == 1) && (B->Header->Dim == 1 ? Result->Header->Sizes[GetIndex(Result->Header->Dim, - 1)] == 1 :
+                                                           Result->Header->Sizes[GetIndex(Result->Header->Dim, - 2)] == 1)),
+           "result-operand(s) shape mismatch for MatMul operation");
+
+    // NOTE(Abid): Assert broadcast shape match
+    for(uint32 Idx = 3; Idx <= GreaterDim; ++Idx) {
+        uint32 ASize = 0; uint32 BSize = 0;
+        if((int32)(A->Header->Dim - Idx) >= 0) ASize = A->Header->Sizes[A->Header->Dim - Idx];
+        if((int32)(B->Header->Dim - Idx) >= 0) BSize = B->Header->Sizes[B->Header->Dim - Idx];
+        /* NOTE(Abid): Check for shape alignment for the operands */
+        boolean IsAGreater = ASize > BSize;
+        Assert((IsAGreater && ((BSize == 1) || (BSize == 0))) ||
+               ((BSize > ASize) && ((ASize == 1) || (ASize == 0))) ||
+               (BSize == ASize), "operand(s) shape mismatch");
+        uint32 GreaterSize = IsAGreater ? ASize : BSize;
+        Assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch");
+    }
+
+    /* NOTE(Abid): Initialize variables */
+    int64 ResDataLeft = Result->Header->StorageNumElements;
+    uintptr AOffset = 0;
+    uintptr BOffset = 0;
+    uintptr ResultOffset = 0;
+
+    memset(Result->Header->AccessSizes, 0, Result->Header->Dim*sizeof(uint32));
+    memset(A->Header->AccessSizes, 0, A->Header->Dim*sizeof(uint32));
+    memset(B->Header->AccessSizes, 0, B->Header->Dim*sizeof(uint32));
+
+    // NOTE(Abid): Are we allowed to backprop through this operation?
+    Result->Header->ShouldGrad = IS_GRAD_PRESERVE();
+
+    int32 IsBroadcastDim = false; // Last if we count from the right
+    
+    bin_op_dtypes OpDTypes = bin_op_dtypes_all_float; /* Assuming all float32 types initially. */
+    if(A->Data.DType == B->Data.DType) { if(A->Data.DType == dtype_int32) OpDTypes = 2; }
+    else if(A->Data.DType == dtype_int32) { OpDTypes = 6; } /* A is int32, B is float32 */
+    else OpDTypes = 4; /* A is float32, B is int32 */
+
+    if(Result->Data.DType == dtype_int32) OpDTypes += 1; /* Determining the result data type */
+
+    switch(OpDTypes) {
+        case bin_op_dtypes_all_float:       { __BIN_MATMUL_DTYPE(A, B, Result, float32, float32, float32, +=); } break;
+        case bin_op_dtypes_float_float_int: { __BIN_MATMUL_DTYPE(A, B, Result, float32, float32, int32, +=);   } break;
+        case bin_op_dtypes_int_int_float:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, int32, float32, +=);     } break;
+        case bin_op_dtypes_all_int:         { __BIN_MATMUL_DTYPE(A, B, Result, int32, int32, int32, +=);       } break;
+        case bin_op_dtypes_float_int_float: { __BIN_MATMUL_DTYPE(A, B, Result, float32, int32, float32, +=);   } break;
+        case bin_op_dtypes_float_int_int:   { __BIN_MATMUL_DTYPE(A, B, Result, float32, int32, int32, +=);     } break;
+        case bin_op_dtypes_int_float_float: { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, float32, +=);   } break;
+        case bin_op_dtypes_int_float_int:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, int32, +=);     } break;
         default:                            InvalidCodePath;
     }
 }
 #undef __BIN_MATMUL_DTYPE
-
 // NOTE(Abid): 3. Main routines for Unary operations
 // TODO(Abid): Implement T32ElementSet() and T32ElementOp here
 #if 0

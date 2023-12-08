@@ -33,45 +33,45 @@ int main()
                                                 2.43f, 6.8f), true);
 #else
     tensor32 *Ten1 = TensorFromArrayLiteral(Ten1, float32,
-                                            ARR(2, 2, 2), // Shape
+                                            ARR(3, 2, 2), // Shape
                                             ARR(-2.4f, 1.43f,
                                                  5.8f,  1.7f,
                                                 12.14f, -3.4f,
+                                                -2.4f, 1.43f,
+                                                22.34f,  2.3f,
                                                 2.43f, 6.8f), true);
 #endif
 
-#if 0
+#if 1
     tensor32 *Ten2 = TensorFromArrayLiteral(Ten2, float32,
                                             ARR(2, 2),
-                                            ARR(1, // 4, 3,
-                                                -2, // 7, 5,
-                                                3, // 4, 3,
-                                                5,), true); // 7, 5));
+                                            ARR(1, -2,
+                                                7, 11,), true);
 #else
     tensor32 *Ten2 = TensorFromArrayLiteral(Ten2, float32, ARR(2), ARR(2, 1.2f), true);
 #endif
-    uint32 Shape1[] = {2, 2, 2};
-    tensor32 *AddResult = T32Empty(Shape1, float32, true);
-    // uint32 ReduceResultShape[] = {1};
-    // tensor32 *ReduceResult = T32Empty(ReduceResultShape, float32, true);
+    uint32 RShape[] = {3, 2, 2};
+    tensor32 *Result = T32Empty(RShape, float32, true);
+    uint32 ReShape[] = {1};
+    tensor32 *ReduceResult = T32Empty(ReShape, float32, true);
 
-    T32Div(Ten1, Ten2, AddResult);
-    // PrintTensor32(AddResult);
-    // T32ReduceSumAll(AddResult, ReduceResult);
+    T32Div(Ten1, Ten2, Result);
+    T32ReduceSumAll(Result, ReduceResult);
 
-    Backward(AddResult, true);
+    Backward(ReduceResult, true);
 
     SwapDataGrad(Ten1);
     SwapDataGrad(Ten2);
-    SwapDataGrad(AddResult);
-        printf("Ten1 Grad\n");
+    SwapDataGrad(ReduceResult);
+        printf("< Ten1 Grad >\n");
         PrintTensor32(Ten1);
-        printf("Ten2 Grad\n");
+        printf("< Ten2 Grad >\n");
         PrintTensor32(Ten2);
-        printf("Result Grad\n");
-        PrintTensor32(AddResult);
+        printf("< ReduceResult Grad >\n");
+        PrintTensor32(ReduceResult);
     SwapDataGrad(Ten1);
     SwapDataGrad(Ten2);
+    SwapDataGrad(ReduceResult);
 
     // T32ReshapeInPlace(Result, ARR(3, 2, 2));
     // T32Transpose(Ten2, 0, -1, Result);

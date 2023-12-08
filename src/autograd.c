@@ -228,6 +228,24 @@ __BackwardT32BinaryDiv(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *Resul
 }
 #undef __BACKWARD_BINARY_DIV
 
+#if 0
+internal void
+__BackwardT32BinaryMatMul(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *ResultOperand, uint32 OperandIdx) {
+
+    // TODO(Abid) Start here...
+    if(OperandIdx == 0) {
+        switch (OtherOperand->Data.DType) {
+            case dtype_float32: { } break;
+            case dtype_int32: { } break;
+        }
+    } else {
+        switch (OtherOperand->Data.DType) {
+            case dtype_float32: { } break;
+            case dtype_int32: { } break;
+        }
+    }
+}
+#endif
 
 /* TODO(Abid): At the current moment, the gradients for the non-leaf tensors are also stored in
  *             within the tensor, which is not good. Ideally, one would want the gradient of
@@ -324,12 +342,11 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
                 Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
                 Assert(Operands[0]->Grad.Ptr, "grad storage not found");
                 Assert(Operands[1]->Grad.Ptr, "grad storage not found");
-                if(SetInitGradZero) __BackwardT32SetElements(Operands[1], 0.f); __BackwardT32SetElements(Operands[1], 0.f);
 
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
+                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[1], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
                 __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[0]);
                 __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[1]);
             } break;
@@ -345,8 +362,8 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
 
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
+                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[1], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
                 __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[0]);
                 __BackwardT32ReduceSubBroadcast(CurrentTensor, Operands[1]);
             } break;
@@ -361,8 +378,8 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
 
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
+                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[1], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
                 __BackwardT32BinaryMul(Operands[1], CurrentTensor, Operands[0]);
                 __BackwardT32BinaryMul(Operands[0], CurrentTensor, Operands[1]);
             } break;
@@ -377,18 +394,32 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
 
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
+                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[1], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
                 __BackwardT32BinaryDiv(Operands[1], CurrentTensor, Operands[0], 0);
                 __BackwardT32BinaryDiv(Operands[0], CurrentTensor, Operands[1], 1);
             } break;
             case op_BinaryMatmul: {
+                Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
+                Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
+                tensor32 *Operands[2];
+                Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
+                Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
+                Assert(Operands[0]->Grad.Ptr, "grad storage not found");
+                Assert(Operands[1]->Grad.Ptr, "grad storage not found");
+
+                StackBlockPush(&StackState, Operands[1]);
+                StackBlockPush(&StackState, Operands[0]);
+                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
+
+                // __BackwardT32BinaryMatMul(Operands[1], CurrentTensor, Operands[0], 0);
+                // __BackwardT32BinaryMatMul(Operands[0], CurrentTensor, Operands[1], 1);
             } break;
             case op_ReduceSumAll: {
                 tensor32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
                 StackBlockPush(&StackState, Operand);
-
                 if(SetInitGradZero) __BackwardT32SetElements(Operand, 0.f);
+
                 __BackwardT32AddToElements(Operand, *(float32 *)CurrentTensor->Grad.Ptr);
             } break;
             case op_None: {
