@@ -22,7 +22,7 @@ More importantly, every tensor operation (with the current exception of Traspose
 - Train an MNIST classifier (Unless we are making our own image library, it is best to use `stb_image` for this)
 
 #### Some of the long-term goals are:
-- Implement CUDA versions of each operation (My GPU yerbn.
+- Implement CUDA versions of each operation (My GPU yearns).
 - Re-implement all operation using vectorized SIMD instructions.
 - Introduce multi-threading at some point (mutexes will be fun -_-)
 
