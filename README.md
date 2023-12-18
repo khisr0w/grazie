@@ -140,7 +140,7 @@ Result:
 
 ![Alt text](doc/ex_2.png "Result")
 
-#### Gradient Calculationa and Backpropagation
+#### Gradient Calculation and Backpropagation
 ```C
 #include "grazie.h"
 
