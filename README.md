@@ -1,5 +1,5 @@
 # grazie (`grad-c`)
-A simple, bare-bones, single-threaded, CPU-based (for now) tensor and autograd library I'm building in my spare. The code is pure C without the use of any libararies (except for C-runtime).
+A simple, bare-bones, single-threaded, CPU-based (for now) tensor and autograd library I'm building in my spare time. The code is pure C without the use of any libararies (except for C-runtime).
 
 The goal of the project is not to build a competitor to any neural network frameworks, but rather an excercise to learn the fundamentals of mathematics that goes into tensor operations used for training neural networks.
 As a result, no emphasis has been put into optimization (although that is something I wish to come back to)
