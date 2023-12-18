@@ -14,10 +14,9 @@ At the moment, the project has the most fundamental tensor operations implemente
 - Matrix Multiplication
 - Transpose (Arbitrary Dimensions)
 
-More importantly, every tensor operation (with the current exception of Traspose and MatMul) has a corresponding backward implements which generates the Jacobian of the tensor for backpropagation.
+More importantly, every tensor operation has a corresponding backward implementation which generates the Jacobian of the tensor for backpropagation.
 
 #### The current short-term focus of the project is to:
-- Implement backward operation for MatMul
 - Train an XOR classifier as a test 
 - Train an MNIST classifier (Unless we are making our own image library, it is best to use `stb_image` for this)
 
