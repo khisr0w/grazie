@@ -16,12 +16,15 @@ typedef enum
 
 typedef enum
 {
-    op_None,
+    op_None = 0,
 
     op_UnaryNegate,
     op_UnaryBroadcast,
     op_UnaryTranpose,
     op_UnaryTranposeAll,
+    op_UnaryReduceSumAll,
+
+    op_UnaryEnd, // NOTE(Abid): Marks the num after the end of unary ops, should not be moved!
 
     // NOTE(Abid): Element wise ops
     op_BinaryAdd,
@@ -31,7 +34,6 @@ typedef enum
 
     op_BinaryMatmul,
 
-    op_ReduceSumAll,
 
 } tensor_op;
 

@@ -23,11 +23,15 @@
 
 #define ArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
 
-// NOTE(Abid): Byte Macros
+/* NOTE(Abid): Byte Macros */
 #define Kilobyte(Value) ((Value)*1024LL)
 #define Megabyte(Value) (Kilobyte(Value)*1024LL)
 #define Gigabyte(Value) (Megabyte(Value)*1024LL)
 #define Terabyte(Value) (Gigabyte(Value)*1024LL)
+
+/* NOTE(Abid): Get Stride and Sizes, WARNING(Abid): The indexing starts from the right side */
+#define GetStrideR(A, IDX) ((A)->Header->Strides[(A)->Header->Dim-(IDX)-1])
+#define GetSizeR(A, IDX) ((A)->Header->Sizes[(A)->Header->Dim-(IDX)-1])
 
 // NOTE(Abid): typedef and static define for ease of use
 typedef uint32_t uint32;

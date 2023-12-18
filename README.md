@@ -27,7 +27,61 @@ More importantly, every tensor operation (with the current exception of Traspose
 - Introduce multi-threading at some point (mutexes will be fun -_-)
 
 ## Examples
-#### Tensor Multiplication with broadcasting
+#### Backpropagation of a Matrix Multiplication with Broadcast Support
+```C
+#include "grazie.h"
+
+int main() {
+    tensor32 *Ten1 = TensorFromArrayLiteral(Ten1, float32, ARR(2, 3, 2),
+                                            ARR(-2.4f, 1.43f,
+                                                 5.8f,  1.7f,
+                                                12.14f, 0.4f,
+
+                                                -3.55f, 14.73f,
+                                                22.34f,  2.3f,
+                                                2.43f, 6.8f), true);
+
+    tensor32 *Ten2 = TensorFromArrayLiteral(Ten2, float32, ARR(2, 4),
+                                            ARR(2.2f, 4.76f, 3.01f, -2.93f,
+                                                7.45f, -6.11f, 11.08f, 5.3f), true);
+
+
+    uint32 RShape[] = {2, 3, 4};
+    tensor32 *Result = T32Empty(RShape, float32, true);
+    uint32 ReShape[] = {1};
+    tensor32 *ReduceResult = T32Empty(ReShape, float32, true);
+
+    T32MatMul(Ten1, Ten2, Result);
+    T32ReduceSumAll(Result, ReduceResult);
+
+    __BackwardT32SetElements(Ten1, 0.f);
+    __BackwardT32SetElements(Ten2, 0.f);
+    __BackwardT32SetElements(Result, 0.f);
+    __BackwardT32SetElements(ReduceResult, 0.f);
+
+    Backward(ReduceResult);
+
+    SwapDataGrad(Ten1);
+    SwapDataGrad(Ten2);
+    SwapDataGrad(ReduceResult);
+        printf("< Ten1 Grad >\n");
+        PrintTensor32(Ten1);
+        printf("< Ten2 Grad >\n");
+        PrintTensor32(Ten2);
+        printf("< ReduceResult Grad >\n");
+        PrintTensor32(ReduceResult);
+    SwapDataGrad(Ten1);
+    SwapDataGrad(Ten2);
+    SwapDataGrad(ReduceResult);
+
+    return(0);
+}
+```
+Result:
+
+![Alt text](doc/ex_0.png "Result")
+
+#### Tensor Multiplication with Broadcasting
 ```C
 #include "grazie.h"
 

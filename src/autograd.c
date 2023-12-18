@@ -144,10 +144,12 @@ internal void __BackwardT32ReduceSubBroadcast(tensor32 *A, tensor32 *Result) { _
         *((float32 *)ResultOperand->Grad.Ptr + ResultOffset) += *((OTHER_OPERAND_DTYPE *)OtherOperand->Data.Ptr + OtherOperandOffset) * \
                                                                 *((float32 *)Parent->Grad.Ptr + ParentOffset); \
         int32 DimMaxNumSoFar = 1; \
+        /* NOTE(Abid): If we have reached the end of the current dim in ResultOperand */ \
         for(int32 DimIdx = 1; DimIdx <= (int32)Parent->Header->Dim; ++DimIdx) { \
             DimMaxNumSoFar *= Parent->Header->Sizes[Parent->Header->Dim-DimIdx]; \
             if(OpNum % DimMaxNumSoFar == 0) { \
-                ParentOffset -= Parent->Header->Strides[Parent->Header->Dim-DimIdx]*(Parent->Header->Sizes[Parent->Header->Dim-DimIdx]-1); \
+                ParentOffset -= Parent->Header->Strides[Parent->Header->Dim-DimIdx] * \
+                                (Parent->Header->Sizes[Parent->Header->Dim-DimIdx]-1); \
                 if((int32)ResultOperand->Header->Dim - DimIdx < 0) ResultOffset = 0; \
                 else ResultOffset -= ResultOperand->Header->Strides[ResultOperand->Header->Dim-DimIdx]* \
                                      (ResultOperand->Header->Sizes[ResultOperand->Header->Dim-DimIdx]-1); \
@@ -163,7 +165,7 @@ internal void __BackwardT32ReduceSubBroadcast(tensor32 *A, tensor32 *Result) { _
         } \
     }
 internal void 
-__BackwardT32BinaryMul(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *ResultOperand) {
+__BackwardT32Mul(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *ResultOperand) {
     switch (OtherOperand->Data.DType) {
         case dtype_float32: { __BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, float32); } break;
         case dtype_int32: { __BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, int32); } break;
@@ -203,7 +205,7 @@ __BackwardT32BinaryMul(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *Resul
         } \
     }
 internal void
-__BackwardT32BinaryDiv(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *ResultOperand, uint32 OperandIdx) {
+__BackwardT32Div(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *ResultOperand, uint32 OperandIdx) {
 
     if(OperandIdx == 0) { // First Operand
         #define __BACKWARD_BINARY_DIV_OPERAND_OP \
@@ -228,22 +230,167 @@ __BackwardT32BinaryDiv(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *Resul
 }
 #undef __BACKWARD_BINARY_DIV
 
-#if 0
-internal void
-__BackwardT32BinaryMatMul(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *ResultOperand, uint32 OperandIdx) {
+internal inline void
+__ExpandVectorDim(tensor32 *A, uint32 Pos) {
+    Assert(A->Header->Dim == 1, "non-vector tensors given");
+    ++A->Header->Dim;
+    A->Header->Sizes[1-Pos] = A->Header->Sizes[0];
+    A->Header->Strides[1-Pos] = A->Header->Strides[0];
+    A->Header->Sizes[Pos] = 1;
+    A->Header->Strides[Pos] = 0;
+}
 
-    // TODO(Abid) Start here...
-    if(OperandIdx == 0) {
-        switch (OtherOperand->Data.DType) {
-            case dtype_float32: { } break;
-            case dtype_int32: { } break;
-        }
+internal inline void
+__SqueezeMatrixToVectorDim(tensor32 *A) {
+    Assert(A->Header->Dim == 2, "must be matrix (dim==2)");
+    Assert((A->Header->Sizes[0] == 1) || (A->Header->Sizes[1] == 1), "at least one dimension size must be 1");
+
+    if(A->Header->Sizes[0] == 1) {
+        A->Header->Sizes[0] = A->Header->Sizes[1];
+        A->Header->Strides[0] = A->Header->Strides[1];
+    }
+    A->Header->Dim = 1;
+}
+
+internal void
+__BackwardT32MatMul(tensor32 **Operands, tensor32 *Parent, uint32 OperandIdx) {
+    tensor32 *OtherOperand = Operands[1-OperandIdx];
+    tensor32 *ResOper = Operands[OperandIdx];
+
+    /* NOTE(Abid): If dim=1, expand by a dim to make it a matrix.
+     *             Ergo, we shall never have a vector (dim != 1) */
+    uint32 OrigOperand0Dim = Operands[0]->Header->Dim;
+    uint32 OrigOperand1Dim = Operands[1]->Header->Dim;
+    uint32 OrigParentDim = Parent->Header->Dim;
+    if(Operands[0]->Header->Dim == 1) {
+        __ExpandVectorDim(Operands[0], 0);
+        if(Parent->Header->Dim == 1) __ExpandVectorDim(Parent, 0);
+    }
+    if(Operands[1]->Header->Dim == 1) {
+        __ExpandVectorDim(Operands[1], 1);
+        if(Parent->Header->Dim == 1) __ExpandVectorDim(Parent, 1);
+    }
+    // NOTE(Abid): 
+    /* NOTE(Abid): Temporarily transpose the OtherOperand */
+    __T32TransposeInPlaceNoGrad(OtherOperand, OtherOperand->Header->Dim-1, OtherOperand->Header->Dim-2);
+
+    /* NOTE(Abid): Defining the first and second operand, as well as their values based on OperandIdx. */
+    tensor32 *FirstOper = NULL;
+    void *FirstOperValPtr = NULL;
+    tensor32 *SecOper = NULL;
+    void *SecOperValPtr = NULL;
+    if(OperandIdx == 1) {
+        FirstOper = OtherOperand;
+        FirstOperValPtr = OtherOperand->Data.Ptr;
+        SecOper = Parent;
+        SecOperValPtr = Parent->Grad.Ptr;
+
     } else {
-        switch (OtherOperand->Data.DType) {
-            case dtype_float32: { } break;
-            case dtype_int32: { } break;
+        FirstOper = Parent;
+        FirstOperValPtr = Parent->Grad.Ptr;
+        SecOper = OtherOperand;
+        SecOperValPtr = OtherOperand->Data.Ptr;
+    }
+
+    /* NOTE(Abid): Total number of broadcasts carried out during the forward process. */
+    uint32 NumOfBroadcastOps = 1;
+    for(uint32 Idx = 2; Idx < Parent->Header->Dim; ++Idx) NumOfBroadcastOps *= GetSizeR(Parent, Idx);
+
+    size_t ResultOffset = 0;
+    size_t FirstOffset = 0;
+    size_t SecondOffset = 0;
+    uint32 ReducedDimSize = GetSizeR(FirstOper, 0);
+
+    uint32 TotalMatMulOps = NumOfBroadcastOps * GetSizeR(ResOper, 0) * GetSizeR(ResOper, 1);
+    for(size_t OpNum = 1; OpNum <= TotalMatMulOps; ++OpNum) {
+        for(uint32 ReduceDimIdx = 0; ReduceDimIdx < ReducedDimSize; ++ReduceDimIdx) {
+            *((float32 *)ResOper->Grad.Ptr + ResultOffset) += *((float32 *)FirstOperValPtr + FirstOffset) *
+                                                                    *((float32 *)SecOperValPtr + SecondOffset);
+            FirstOffset += GetStrideR(FirstOper, 0);
+            SecondOffset += GetStrideR(SecOper, 1);
+        }
+        FirstOffset -= GetStrideR(FirstOper, 0) * GetSizeR(FirstOper, 0);
+        SecondOffset -= GetStrideR(SecOper, 1) * GetSizeR(SecOper, 1);
+
+        uint32 DimMaxNumSoFar = GetSizeR(ResOper, 0);
+
+        /* NOTE(Abid): In case we've not reached end of dim=1 */
+        if(OpNum % DimMaxNumSoFar != 0) {
+            SecondOffset += GetStrideR(SecOper, 0);
+            ResultOffset += GetStrideR(ResOper, 0);
+            continue;
+        } else {
+            SecondOffset -= GetStrideR(SecOper, 0) * (GetSizeR(SecOper, 0)-1);
+            ResultOffset -= GetStrideR(ResOper, 0) * (GetSizeR(ResOper, 0)-1);
+        }
+        DimMaxNumSoFar *= GetSizeR(ResOper, 1);
+
+        /* NOTE(Abid): In case we've not reached end of dim=2 */
+        if(OpNum % DimMaxNumSoFar != 0) {
+            FirstOffset += GetStrideR(FirstOper, 1);
+            ResultOffset += GetStrideR(ResOper, 1);
+            continue;
+        } else {
+            FirstOffset -= GetStrideR(FirstOper, 1) * (GetSizeR(FirstOper, 1)-1);
+            ResultOffset -= GetStrideR(ResOper, 1) * (GetSizeR(ResOper, 1)-1);
+        }
+
+        /* NOTE(Abid): We are in the broadcast dimensions now. Parent tensor is the one with
+         *             the greatest possible dim, therefore, we loop through that */
+        for(uint32 DimIdx = 2; DimIdx < Parent->Header->Dim; ++DimIdx) {
+            DimMaxNumSoFar *= GetSizeR(Parent, DimIdx);
+
+            /* NOTE(Abid): Check if we've reached the end of this dim */
+            if(OpNum % DimMaxNumSoFar == 0) {
+                if(ResOper->Header->Dim-DimIdx > 0) {
+                    ResultOffset -= GetStrideR(ResOper, DimIdx) * (GetSizeR(ResOper, DimIdx)-1);
+                } else ResultOffset = 0;
+
+                if(FirstOper->Header->Dim-DimIdx > 0) {
+                    FirstOffset -= GetStrideR(FirstOper, DimIdx) * (GetSizeR(FirstOper, DimIdx)-1);
+                } else FirstOffset = 0;
+
+                if(SecOper->Header->Dim-DimIdx > 0) {
+                    SecondOffset -= GetStrideR(SecOper, DimIdx) * (GetSizeR(SecOper, DimIdx)-1);
+                } else SecondOffset = 0;
+            } else {
+                /* NOTE(Abid): In case we've not reached the end of this dim */
+                if(ResOper->Header->Dim-DimIdx > 0) ResultOffset += GetStrideR(ResOper, DimIdx);
+                else ResultOffset = 0;
+
+                if(FirstOper->Header->Dim-DimIdx > 0) FirstOffset += GetStrideR(FirstOper, DimIdx);
+                else FirstOffset = 0;
+
+                if(SecOper->Header->Dim-DimIdx > 0) SecondOffset += GetStrideR(SecOper, DimIdx);
+                else SecondOffset = 0;
+                break;
+            }
         }
     }
+
+    /* NOTE(Abid): Reverse the temporary transpose */
+    __T32TransposeInPlaceNoGrad(OtherOperand, OtherOperand->Header->Dim-1, OtherOperand->Header->Dim-2);
+
+    /* NOTE(Abid): Reverse the vector dim expansions */
+    if(Operands[0]->Header->Dim != OrigOperand0Dim) __SqueezeMatrixToVectorDim(Operands[0]);
+    if(Operands[1]->Header->Dim != OrigOperand1Dim) __SqueezeMatrixToVectorDim(Operands[1]);
+    if(Parent->Header->Dim != OrigParentDim) __SqueezeMatrixToVectorDim(Parent);
+}
+
+#if 0
+internal inline void
+__SqueezeEmptyDims(tensor32 *A) {
+    uint32 DimsToPreserve = 0;
+    for(int32 Idx = 0; Idx < (int32)A->Header->Dim; ++Idx) {
+        if(A->Header->Size[Idx] == 1) continue;
+        for(int32 Jdx = Idx-1; Jdx < Idx; --Jdx) {
+            if(A->Header->Size[Jdx] != 1) break;
+            A->Header->Size[Jdx] = A->Header->Size[Idx];
+        }
+        ++DimsToPreserve;
+    }
+    if(DimsToPreserve == 0) ++DimsToPreserve;
+    A->Header->Dim = DimsToPreserve;
 }
 #endif
 
@@ -257,7 +404,7 @@ __BackwardT32BinaryMatMul(tensor32 *OtherOperand, tensor32 *Parent, tensor32 *Re
  * TODO(Abid): In the end, add an Assert so that RootTensor should only have shape=(1).
  */
 internal void
-Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
+Backward(tensor32 *RootTensor) {
     /*
        NOTE(Abid): Here's how `Backward` works:
 
@@ -314,7 +461,6 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
         StackState.CurrentBlock = AllocNewStackBlock(StackState.NewAllocTensorNum, NULL);
     }
 
-    if(SetInitGradZero) __BackwardT32SetElements(RootTensor, 0.f);
     __BackwardT32AddToElements(RootTensor, 1.f);
 
     // NOTE(Abid): Backpropagation logic starts here
@@ -322,10 +468,25 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
 
     while(!IsStackBlocksEmpty(&StackState)) {
         tensor32 *CurrentTensor = StackBlockTop(&StackState);
+        tensor_op CurrentOp = CurrentTensor->Header->DerivedOp.TensorOp;
         StackBlockPop(&StackState);
-        if(!CurrentTensor->Header->ShouldGrad) continue;
+        if(!CurrentTensor->Header->ShouldGrad || CurrentOp == op_None) continue;
 
-        switch (CurrentTensor->Header->DerivedOp.TensorOp) {
+        Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
+        Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
+        tensor32 *Operands[2];
+        Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
+        Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
+
+        Assert(Operands[0]->Grad.Ptr, "grad storage not found");
+        Assert((CurrentOp > op_UnaryEnd  && Operands[1]->Grad.Ptr) ||
+               CurrentOp < op_UnaryEnd, "grad storage not found");
+        Assert(CurrentTensor->Data.DType == dtype_float32, "cannot backpropagate through a non-float tensor")
+        Assert(Operands[0]->Data.DType == dtype_float32, "cannot backpropagate through a non-float tensor")
+        Assert((CurrentOp > op_UnaryEnd  && Operands[1]->Data.DType == dtype_float32) ||
+               CurrentOp < op_UnaryEnd, "cannot backpropagate through a non-float tensor")
+
+        switch (CurrentOp) {
             case op_UnaryNegate: {
             } break;
             case op_UnaryBroadcast: {
@@ -335,99 +496,46 @@ Backward(tensor32 *RootTensor, boolean SetInitGradZero) {
             case op_UnaryTranposeAll: {
             } break;
             case op_BinaryAdd: {
-                Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
-                Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
-                tensor32 *Operands[2];
-                Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
-                Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
-                Assert(Operands[0]->Grad.Ptr, "grad storage not found");
-                Assert(Operands[1]->Grad.Ptr, "grad storage not found");
-
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
                 __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[0]);
                 __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[1]);
             } break;
             case op_BinarySub: {
-                // NOTE(Abid): Copy pasta here
-                Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
-                Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
-                tensor32 *Operands[2];
-                Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
-                Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
-                Assert(Operands[0]->Grad.Ptr, "grad storage not found");
-                Assert(Operands[1]->Grad.Ptr, "grad storage not found");
-
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
                 __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[0]);
                 __BackwardT32ReduceSubBroadcast(CurrentTensor, Operands[1]);
             } break;
             case op_BinaryMul: {
-                Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
-                Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
-                tensor32 *Operands[2];
-                Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
-                Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
-                Assert(Operands[0]->Grad.Ptr, "grad storage not found");
-                Assert(Operands[1]->Grad.Ptr, "grad storage not found");
-
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                __BackwardT32BinaryMul(Operands[1], CurrentTensor, Operands[0]);
-                __BackwardT32BinaryMul(Operands[0], CurrentTensor, Operands[1]);
+                __BackwardT32Mul(Operands[1], CurrentTensor, Operands[0]);
+                __BackwardT32Mul(Operands[0], CurrentTensor, Operands[1]);
             } break;
             case op_BinaryDiv: {
-                Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
-                Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
-                tensor32 *Operands[2];
-                Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
-                Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
-                Assert(Operands[0]->Grad.Ptr, "grad storage not found");
-                Assert(Operands[1]->Grad.Ptr, "grad storage not found");
-
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                __BackwardT32BinaryDiv(Operands[1], CurrentTensor, Operands[0], 0);
-                __BackwardT32BinaryDiv(Operands[0], CurrentTensor, Operands[1], 1);
+                __BackwardT32Div(Operands[1], CurrentTensor, Operands[0], 0);
+                __BackwardT32Div(Operands[0], CurrentTensor, Operands[1], 1);
             } break;
             case op_BinaryMatmul: {
-                Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
-                Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
-                tensor32 *Operands[2];
-                Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
-                Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
-                Assert(Operands[0]->Grad.Ptr, "grad storage not found");
-                Assert(Operands[1]->Grad.Ptr, "grad storage not found");
-
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);
-                if(SetInitGradZero) { __BackwardT32SetElements(Operands[0], 0.f); __BackwardT32SetElements(Operands[1], 0.f); }
 
-                // __BackwardT32BinaryMatMul(Operands[1], CurrentTensor, Operands[0], 0);
-                // __BackwardT32BinaryMatMul(Operands[0], CurrentTensor, Operands[1], 1);
+                __BackwardT32MatMul(Operands, CurrentTensor, 0);
+                __BackwardT32MatMul(Operands, CurrentTensor, 1);
             } break;
-            case op_ReduceSumAll: {
+            case op_UnaryReduceSumAll: {
                 tensor32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
                 StackBlockPush(&StackState, Operand);
-                if(SetInitGradZero) __BackwardT32SetElements(Operand, 0.f);
 
                 __BackwardT32AddToElements(Operand, *(float32 *)CurrentTensor->Grad.Ptr);
             } break;
-            case op_None: {
-                continue;
-            } break;
-            /* case op_Ignore: {
-                continue;
-            } break; */
             default: Assert(0, "invalid code path");
         }
     }

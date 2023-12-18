@@ -15,7 +15,6 @@
    - The stride calculation is trivial and makes operation on inplace tranposed tensor slow
    - Write a more efficient math ops routines for when `IsContiguous = true` in the tensor
 
-   - Implement Broadcast
    - Indexing Schemes
    - Softmax
    - Sigmoid
@@ -36,10 +35,6 @@
      Perhaps a function called `BackwardAndFlush()` be used for this.
      TODO(Abid): We could have a check at the start of each loop to see if its free.
 
-   - The `PrintTensor` will be a macro where it will reset its memory footprint after the
-     function __UnsafePrintTensor is done being called. Therefore, if there was an adhoc
-     computation at the argument of PrintTensor, then we will print and free the memory.
-
    - To remove a non-presistent tensor, we will go through all the operands who is not
      persistent and free those as well.
 
@@ -51,6 +46,8 @@
 
 #include "tensor.h"
 
+/* NOTE(Abid): The minimum allocated space for Stride/Shape is 2*sizeof(uint32),
+ *             Since, it will ease up the math computations and allow reshape ops */
 #define __ALLOC_TENSOR_DTYPE(TYPE, StoreGrad) \
     tensor32 *Result = NULL; \
     \
@@ -58,9 +55,11 @@
     for (uint32 i = 0; i < ShapeLength; ++i) { DataSize *= Shape[i]; } \
     Assert(DataSize != 0, "wrong shape given, cannot be zero"); \
     \
+    uint32 AllocShapeLength = ShapeLength; \
+    if(ShapeLength == 1) ++AllocShapeLength;\
     size_t FinalSize = sizeof(tensor32) + \
                        sizeof(tensor_header) + \
-                       3*ShapeLength*sizeof(uint32) + /* For Stride, Shape, SizesAccessPtr */ \
+                       3*AllocShapeLength*sizeof(uint32) + /* For Stride, Shape, SizesAccessPtr */ \
                        2*sizeof(tensor32 *) + /*  For tensor operands */ \
                        DataSize*sizeof(TYPE) + \
                        (int32)StoreGrad*DataSize*sizeof(float32); /* StoreGrad for backprop */ \
@@ -70,8 +69,8 @@
     Result->Header = (tensor_header *)(Result+1); \
     Assert(Result->Header, "storage memory cannot be allocated"); \
     Result->Header->Sizes = (uint32 *)(Result->Header+1); \
-    Result->Header->Strides = (uint32 *)(Result->Header->Sizes + ShapeLength); \
-    Result->Header->AccessSizes = (uint32 *)(Result->Header->Strides + ShapeLength); \
+    Result->Header->Strides = (uint32 *)(Result->Header->Sizes + AllocShapeLength); \
+    Result->Header->AccessSizes = (uint32 *)(Result->Header->Strides + AllocShapeLength); \
     Result->Data.DType = dtype_##TYPE; \
     Result->Grad.DType = dtype_float32; \
     Result->Header->IsContiguous = true; \
@@ -82,7 +81,7 @@
     Result->Header->DerivedOp.OpContext = NULL; /* TODO(Abid): This memory gets created during math ops, which is not nice
                                                               Figure out a max ceiling and always allocate that at init */ \
     \
-    Result->Header->DerivedOp.Operands = (tensor32 **)(Result->Header->AccessSizes + ShapeLength); \
+    Result->Header->DerivedOp.Operands = (tensor32 **)(Result->Header->AccessSizes + AllocShapeLength); \
     Result->Data.Ptr = (void *)((tensor32 **)Result->Header->DerivedOp.Operands + 2); /* 2 operands by default */ \
     if(StoreGrad) { \
         Result->Grad.Ptr = ((TYPE *)Result->Data.Ptr) + DataSize; \
@@ -93,8 +92,10 @@
     /* NOTE(Abid): Setting Default Values */ \
     Result->Header->Offset = 0; \
     Result->Header->Dim = ShapeLength; \
-    memcpy(Result->Header->Sizes, Shape, ShapeLength*sizeof(uint32)); \
+    memcpy(Result->Header->Sizes, Shape, AllocShapeLength*sizeof(uint32)); \
     \
+    /* TODO(Abid): When this routine gets de-coupled to separate header and data allocation process, then
+     *             the stride calculation must also be altered to account for non-contiguous storages. */ \
     /* NOTE(Abid): Calculate the strides given the tensor shape */ \
     for(uint32 i = 0; i < Result->Header->Dim; ++i) { \
         if(Result->Header->Sizes[i] == 1) Result->Header->Strides[i] = 0; \
@@ -104,7 +105,7 @@
         /* NOTE(Abid): If the size in a dim is 1, then the stride will be zero */ \
         for(uint32 i = 0; i < (Result->Header->Dim-1); ++i) \
                 for(uint32 j = i+1; j < Result->Header->Dim; ++j) { Result->Header->Strides[i] *= \
-                                                                   Result->Header->Sizes[j]; } \
+                                                                    Result->Header->Sizes[j]; } \
     } \
     \
     if(Data) { \
@@ -138,12 +139,10 @@ _int32AllocTensor(uint32 *Shape, uint32 ShapeLength, int32 *Data, size_t DataLen
     } while(0);
 
 internal inline size_t
-GetStorageSize(uint32 *Sizes, uint32 Dim)
-{
+GetStorageSize(uint32 *Sizes, uint32 Dim) {
     size_t Result = 1;
 
-    for (uint32 Idx = 0; Idx < Dim; ++Idx)
-    {
+    for (uint32 Idx = 0; Idx < Dim; ++Idx) {
         Assert(Sizes[Idx], "tensor shape cannot be zero")
         Result *= Sizes[Idx];
     }
@@ -152,8 +151,7 @@ GetStorageSize(uint32 *Sizes, uint32 Dim)
 }
 
 internal inline boolean
-IsArrayEqual(uint32 *Array1, uint32 *Array2, uint32 Array1Length, uint32 Array2Length)
-{
+IsArrayEqual(uint32 *Array1, uint32 *Array2, uint32 Array1Length, uint32 Array2Length) {
     if(Array1Length != Array2Length) return false;
 
     for (uint32 Idx = 0; Idx < Array1Length; ++Idx)
@@ -164,32 +162,6 @@ IsArrayEqual(uint32 *Array1, uint32 *Array2, uint32 Array1Length, uint32 Array2L
 
 internal inline boolean
 IsShapeEqual(tensor_header *A, tensor_header *B) { return IsArrayEqual(A->Sizes, B->Sizes, A->Dim, B->Dim); }
-
-internal inline boolean
-_PrintIsOuterAndUpdateDims(int32 *AccessDimIdx, uint32 *AccessDims, tensor_header *TenHeader, int32 *PrintCount)
-{
-    boolean IsOuterDim = *AccessDimIdx != (int32)(TenHeader->Dim-1);
-    if (IsOuterDim)
-    {
-        // NOTE(Abid): Start of the dimension
-        if (AccessDims[*AccessDimIdx] == 0) { printf("["); ++(*PrintCount); }
-
-        // NOTE(Abid): In case we have reached the end of this dimension
-        if (AccessDims[*AccessDimIdx] == TenHeader->Sizes[*AccessDimIdx])
-        {
-            printf("]"); ++(*PrintCount);
-            if((*AccessDimIdx-1) >= 0 &&
-                    AccessDims[*AccessDimIdx-1] < (TenHeader->Sizes[*AccessDimIdx-1]-1))
-            { printf(", "); ++(*PrintCount); }
-
-            AccessDims[(*AccessDimIdx)--] = 0;
-            if(*AccessDimIdx == -1) return IsOuterDim;
-            ++AccessDims[(*AccessDimIdx)];
-        } else ++(*AccessDimIdx);
-    }
-
-    return IsOuterDim;
-}
 
 #define __PRINT_DTYPE(TEN_NAME, PRINT_FORMAT, TYPE) \
     printf(TEN_NAME); \
@@ -257,6 +229,7 @@ SwapDataGrad(tensor32 *Tensor) {
 // =======================================
 // NOTE(Abid): Math Operations
 // =======================================
+/* TODO(Abid): Refactor elementwise routines so that any vector (dim==1) gets converted to a matrix beforehand. */
 
 internal inline void
 T32ReduceSumAll(tensor32 *A, tensor32 *Result) {
@@ -278,7 +251,7 @@ T32ReduceSumAll(tensor32 *A, tensor32 *Result) {
     if(Result->Data.DType == dtype_int32) *(int32 *)Result->Data.Ptr = (int32)ResSum;
     else *(float32 *)Result->Data.Ptr = ResSum;
 
-    Result->Header->DerivedOp.TensorOp = op_ReduceSumAll; \
+    Result->Header->DerivedOp.TensorOp = op_UnaryReduceSumAll; \
     Result->Header->DerivedOp.Operands[0] = A; \
 }
 
@@ -408,7 +381,6 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
     Result->Header->DerivedOp.TensorOp = DerivedOpType; \
     Result->Header->DerivedOp.Operands[0] = A; \
     Result->Header->DerivedOp.Operands[1] = B;
-
 
 typedef enum {
     bin_op_dtypes_all_float = 0,
@@ -575,9 +547,9 @@ T32MatMul(tensor32 *A, tensor32 *B, tensor32 *Result) {
     Assert(A->Header->Sizes[ALastIdx] == B->Header->Sizes[BSecondLastIdx],
            "operand(s) shape mismatch for MatMul operation");
 
-    // NOTE(Abid): Assert the shapes of the result tensor match with the MatMul operation's required shape.
-    //             1. In case, the lesserDim is 1, then we expect the last dimension of result to be 1 as well
-    //             2. Otherwise, the dimensions must match with the result of the MatMul operation.
+    /* NOTE(Abid): Assert the shapes of the result tensor match with the MatMul operation's required shape.
+     *             1. In case, the lesserDim is 1, then we expect the last dimension of result to be 1 as well
+     *             2. Otherwise, the dimensions must match with the result of the MatMul operation. */
     Assert(((LesserDim > 1) && (
                                     (A->Header->Sizes[GetIndex(A->Header->Dim, -2)] ==
                                      Result->Header->Sizes[GetIndex(Result->Header->Dim, -2)]) &&
@@ -635,6 +607,10 @@ T32MatMul(tensor32 *A, tensor32 *B, tensor32 *Result) {
         case bin_op_dtypes_int_float_int:   { __BIN_MATMUL_DTYPE(A, B, Result, int32, float32, int32, =);     } break;
         default:                            InvalidCodePath;
     }
+
+    Result->Header->DerivedOp.TensorOp = op_BinaryMatmul;
+    Result->Header->DerivedOp.Operands[0] = A;
+    Result->Header->DerivedOp.Operands[1] = B;
 }
 
 internal void
@@ -859,27 +835,31 @@ __T32ReshapeInPlace(tensor32 A, int32 *NewSizes, uint32 NewSizesLength) {
         } \
     }
 
-internal void
-T32TransposeInPlace(tensor32 A, int32 Dim1, int32 Dim2)
+internal inline void
+__T32TransposeInPlaceNoGrad(tensor32 *A, int32 Dim1, int32 Dim2)
 {
     // TODO(Abid): Properly check if the transpose could make the tensor contiguous again.
-    Assert(A.Header->IsContiguous, "cannot transpose non-contiguous tensor");
+    Assert(A->Header->IsContiguous, "cannot transpose non-contiguous tensor");
 
     // NOTE(Abid): Support for negative indexing.
-    Dim1 = (A.Header->Dim + Dim1) % A.Header->Dim;
-    Dim2 = (A.Header->Dim + Dim2) % A.Header->Dim;
+    Dim1 = (A->Header->Dim + Dim1) % A->Header->Dim;
+    Dim2 = (A->Header->Dim + Dim2) % A->Header->Dim;
 
-    Assert(((int32)A.Header->Dim >= Dim1) && ((int32)A.Header->Dim >= Dim2), "dimension index out of bounds");
+    Assert(((int32)A->Header->Dim >= Dim1) && ((int32)A->Header->Dim >= Dim2), "dimension index out of bounds");
 
     // NOTE(Abid): Swap the sizes and strides
-    uint32 Temp = A.Header->Sizes[Dim1];
-    A.Header->Sizes[Dim1] = A.Header->Sizes[Dim2];
-    A.Header->Sizes[Dim2] = Temp;
-    Temp = A.Header->Strides[Dim1];
-    A.Header->Strides[Dim1] = A.Header->Strides[Dim2];
-    A.Header->Strides[Dim2] = Temp;
+    uint32 Temp = A->Header->Sizes[Dim1];
+    A->Header->Sizes[Dim1] = A->Header->Sizes[Dim2];
+    A->Header->Sizes[Dim2] = Temp;
+    Temp = A->Header->Strides[Dim1];
+    A->Header->Strides[Dim1] = A->Header->Strides[Dim2];
+    A->Header->Strides[Dim2] = Temp;
+}
 
-    A.Header->IsContiguous = false;
+internal inline void
+T32TransposeInPlace(tensor32 *A, int32 Dim1, int32 Dim2) {
+    __T32TransposeInPlaceNoGrad(A, Dim1, Dim2);
+    A->Header->IsContiguous = false;
 }
 
 #if 0
