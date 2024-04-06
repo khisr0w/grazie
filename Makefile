@@ -16,7 +16,7 @@ CFLAGS_RELEASE := #/O2 /Oi /MT /DRELEASE
 ifeq ($(OS),Windows_NT)
 EXECUTABLE := grazie.exe
 CC := cl
-CFLAGS_COMMON := /EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208 /wd4505 /wd4127
+CFLAGS_COMMON := /EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208 /wd4505 /wd4127 /DGRAZIE_PLT_WIN /DGRAZIE_ASSERT
 CFLAGS_DEBUG := /Od /MTd /Z7 /Zo /DGRAZIE_DEBUG
 CFLAGS_RELEASE := /O2 /Oi /MT /DGRAZIE_RELEASE
 endif

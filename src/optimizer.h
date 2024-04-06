@@ -1,20 +1,15 @@
 /*  +======| File Info |===============================================================+
     |                                                                                  |
     |     Subdirectory:  /src                                                          |
-    |    Creation date:  Mo 20 Mär 2023 20:58:37 CET                                  |
+    |    Creation date:  3/14/2024 5:11:50 PM                                          |
     |    Last Modified:                                                                |
     |                                                                                  |
-    +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
+    +======================================| Copyright © Sayed Abid Hashimi |==========+  */
 
-#if !defined(MEMORY_H)
+#if !defined(OPTIMIZER_H)
 
-typedef struct {
-    /* NOTE(Abid): Memory */
-    int8_t *MemPtr;
-    size_t MemMaxByteSize;
-    size_t MemByteUsed;
 
-} grazie_state;
 
-#define MEMORY_H
+
+#define OPTIMIZER_H
 #endif

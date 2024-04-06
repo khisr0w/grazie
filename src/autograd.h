@@ -9,16 +9,14 @@
 #if !defined(AUTOGRAD_H)
 
 typedef struct stack_block stack_block;
-struct stack_block
-{
-    tensor32 **TensorPtr;
+struct stack_block {
+    t32 **TensorPtr;
     size_t MaxNumTen;
 
     stack_block *BelowBlock;
 };
 
-typedef struct
-{
+typedef struct {
     stack_block *CurrentBlock;
     size_t CurrentBlockTopIdx;
     size_t GlobalMaxTensorNum;
