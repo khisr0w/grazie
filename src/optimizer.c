@@ -14,6 +14,7 @@ typedef struct {
     usize Ptr;
 } tensor_list;
 
+#if 0
 internal tensor_list *
 __GLOBALCurrentOptimizerList(tensor_list *NewList, bool ShouldChange) {
     local_persist tensor_list CurrentList;
@@ -26,9 +27,10 @@ __GLOBALCurrentOptimizerList(tensor_list *NewList, bool ShouldChange) {
 
     return &CurrentList;
 }
+#endif
 
 internal inline void
-__T32AddToTensorList(t32 *Tensor, tensor_list *TensorList) {
+__T32AddToTensorList(tensor_list *TensorList, t32 *Tensor) {
     Assert(TensorList->Array != NULL, "cannot add tensor to an NULL tensor_list");
 
     if(TensorList->Ptr+1 == TensorList->Size) {

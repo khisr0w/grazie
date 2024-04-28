@@ -25,6 +25,7 @@
 #include "autograd.c"
 #include "loss.c"
 #include "optimizer.c"
+#include "module.c"
 
 #define GRAZIE_H
 #endif

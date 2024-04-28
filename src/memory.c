@@ -9,38 +9,20 @@
 #include "memory.h"
 
 /* TODO(Abid): The custum allocators should be defined here */
-#define Free(ptr) free(ptr)
-#define Malloc(ptr) malloc(ptr)
-#define Calloc(ptr, size) calloc(ptr, size)
-#define Realloc(ptr, size) realloc(ptr, size)
+#define _Free(ptr) free(ptr)
+#define _Malloc(ptr) malloc(ptr)
+#define _Calloc(ptr, size) calloc(ptr, size)
+#define _Realloc(ptr, size) realloc(ptr, size)
 
-/* NOTE(Abid): To be defined by the user upon including the header files! */
-#define MEMORYFOOTPRINTBYTES Gigabyte(2)
+#define PlatformAlloc(Size)
 
-internal void InitGrazie(size_t MemSizeAlloc);
+typedef struct {
+    usize UsedSize;
+    usize MaxSize;
+    void *Ptr;
+} arena;
 
-internal grazie_state *
-GrazieState()
-{
-    local_persist grazie_state GrazieState = {0};
-    local_persist bool IsInitialized = false;
+inline internal arena
+AllocateArena(usize BytesToAllocate) {
 
-    if(!IsInitialized) 
-    {
-        InitGrazie(MEMORYFOOTPRINTBYTES);
-        IsInitialized = true;
-    }
-
-    return &GrazieState;
 }
-
-internal void
-InitGrazie(size_t MemSizeAlloc)
-{
-    /* TODO(Abid): BUGGGGGGGG!!!!! 0_0 */
-    grazie_state *State = GrazieState();
-    State->MemPtr = malloc(MemSizeAlloc);
-    State->MemMaxByteSize = MemSizeAlloc;
-    State->MemByteUsed = 0;
-}
-

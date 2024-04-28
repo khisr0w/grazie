@@ -10,11 +10,11 @@
 
 i32 main() {
     /* NOTE(Abid): To implement XOR NN, we need:
-     *             1. Sigmoid (DONE)
-     *             2. (Binary) CrossEntropy Loss
-     *             3. SGD Optimizer 
-     *             4. Non-Linearities
-     *             5. Linear Module 
+     *             1. Sigmoid                    (DONE)
+     *             2. (Binary) CrossEntropy Loss (DONE)
+     *             3. SGD Optimizer              (DONE)
+     *             4. Non-Linearities(ReLU)      (DONE)
+     *             5. Linear Module              (DONE)
      */
 
     t32 *A = TensorFromArrayLiteral(A, f32, ARR(3, 4),
@@ -23,20 +23,17 @@ i32 main() {
                                         6.45f, 5.0f, 1.3f,
                                         -1.4f, 44.14f, 11.9f), true);
 
-    t32 *B = TensorFromArrayLiteral(B, f32,
-                                    ARR(3, 4),
+    t32 *B = TensorFromArrayLiteral(B, f32, ARR(3, 4),
                                     ARR(19.234f, 18.007f, 90.562f, 18.204f,
                                         30.362f, 31.658f, 60.179f, 77.811f,
                                         89.703f, 60.655f, 15.55f, 97.477f), true);
     u32 LShape[] = {1};
     t32 *LossRes = T32Empty(LShape, f32, true);
     tensor_list OptimList = T32AllocateTensorList(1024);
-    __T32AddToTensorList(A, &OptimList);
-    //__T32AddToTensorList(B, &OptimList);
+    __T32AddToTensorList(&OptimList, A);
+    //__T32AddToTensorList(&OptimList, B);
 
-    OptimList.Size;
-
-    T32Sigmoid(A, B);
+    T32ReLU(A, B);
     T32Print(B);
     T32ReduceSumAll(B, LossRes);
     T32Backprop(LossRes);

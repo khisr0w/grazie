@@ -23,6 +23,7 @@ typedef enum {
     op_UnaryTranposeAll,
     op_UnaryReduceSumAll,
     op_UnarySigmoid,
+    op_UnaryReLU,
 
     op_UnaryEnd, /* NOTE(Abid): Marks the num after the end of unary ops, WARNING: should not be moved! */
 

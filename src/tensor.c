@@ -760,6 +760,41 @@ Clamp(f32 Value, f32 Min, f32 Max) {
     return ClampBelow > Max ? Max : ClampBelow;
 }
 
+internal inline void
+T32ReLU(t32 *A, t32 *Result) {
+    tensor_header *AHead = A->Header;
+    f32 *AStorage = A->Data.Ptr;
+    tensor_header *ResHead = Result->Header;
+    f32 *ResStorage = Result->Data.Ptr;
+
+    Assert((AStorage != NULL) && (ResStorage != NULL), "null storage found");
+    Assert(IsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
+
+    size_t ANumData = AHead->StorageNumElements;
+    size_t ResultOffset = 0;
+    size_t AOffset = 0;
+    for(size_t OpNum = 1; OpNum <= ANumData; ++OpNum) {
+        f32 Value = *(AStorage + AOffset);
+        *(ResStorage + ResultOffset) = (Value < 0) ? 0.f : Value;
+
+        i32 DimMaxNumSoFar = 1;
+        for(i32 DimIdx = 1; DimIdx <= (i32)AHead->Dim; ++DimIdx) {
+            DimMaxNumSoFar *= AHead->Sizes[AHead->Dim-DimIdx];
+            if(OpNum % DimMaxNumSoFar == 0) {
+                AOffset -= AHead->Strides[AHead->Dim-DimIdx]*(AHead->Sizes[AHead->Dim-DimIdx]-1);
+                ResultOffset -= ResHead->Strides[ResHead->Dim-DimIdx]*(ResHead->Sizes[ResHead->Dim-DimIdx]-1);
+                continue;
+            }
+            AOffset += AHead->Strides[AHead->Dim-DimIdx];
+            ResultOffset += ResHead->Strides[ResHead->Dim-DimIdx];
+            break;
+        }
+    }
+
+    Result->Header->DerivedOp.TensorOp = op_UnaryReLU;
+    Result->Header->DerivedOp.Operands[0] = A;
+}
+
 internal void
 __LossLogOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHead, f32 *ResStorage) {
     Assert((SrcStorage != NULL) && (ResStorage != NULL), "null storage found");

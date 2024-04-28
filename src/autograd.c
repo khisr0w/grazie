@@ -166,6 +166,8 @@ __BackwardT32ReduceSubBroadcast(t32 *A, t32 *Result) { __REDUCE_BROADCAST_DIMS(A
             break; \
         } \
     }
+/* TODO(Abid): Doing a backprop on i32 doesn't make sense, this routine should be ammended so
+ *             that only f32 remains. */
 internal void 
 __BackwardT32Mul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
     switch (OtherOperand->Data.DType) {
@@ -206,6 +208,9 @@ __BackwardT32Mul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
             break; \
         } \
     }
+
+/* TODO(Abid): Doing a backprop on i32 doesn't make sense, this routine should be ammended so
+ *             that only f32 remains. */
 internal void
 __BackwardT32Div(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand, u32 OperandIdx) {
 
@@ -385,9 +390,37 @@ __T32BackwardSigmoid(t32 *Operand, t32 *Parent) {
     size_t ParentOffset = 0;
     size_t OperOffset = 0;
     for(size_t OpNum = 1; OpNum <= OperandNumData; ++OpNum) {
-        f32 SigValue = ((f32 *)Parent->Data.Ptr)[OperOffset];
-        ((f32 *)Operand->Grad.Ptr)[OperOffset] += (SigValue * (1-SigValue))*
+        f32 Value = ((f32 *)Parent->Data.Ptr)[OperOffset];
+        ((f32 *)Operand->Grad.Ptr)[OperOffset] += (Value * (1-Value))*
                                                      ((f32 *)Parent->Grad.Ptr)[ParentOffset];
+        i32 DimMaxNumSoFar = 1;
+        for(i32 DimIdx = 1; DimIdx <= (i32)Operand->Header->Dim; ++DimIdx) {
+            DimMaxNumSoFar *= Operand->Header->Sizes[Operand->Header->Dim-DimIdx];
+            if(OpNum % DimMaxNumSoFar == 0) {
+                OperOffset -= Operand->Header->Strides[Operand->Header->Dim-DimIdx]*
+                              (Operand->Header->Sizes[Operand->Header->Dim-DimIdx]-1);
+                ParentOffset -= Parent->Header->Strides[Parent->Header->Dim-DimIdx]*
+                                (Parent->Header->Sizes[Parent->Header->Dim-DimIdx]-1);
+                continue;
+            }
+            OperOffset += Operand->Header->Strides[Operand->Header->Dim-DimIdx];
+            ParentOffset += Parent->Header->Strides[Parent->Header->Dim-DimIdx];
+            break;
+        }
+    }
+}
+
+internal void
+__T32BackwardReLU(t32 *Operand, t32 *Parent) {
+    size_t OperandNumData = Operand->Header->StorageNumElements;
+    size_t ParentOffset = 0;
+    size_t OperOffset = 0;
+    for(size_t OpNum = 1; OpNum <= OperandNumData; ++OpNum) {
+        f32 *DestGrad = ((f32 *)Operand->Grad.Ptr);
+        f32 *DestVal = ((f32 *)Operand->Data.Ptr);
+        f32 ParGrad = ((f32 *)Parent->Grad.Ptr)[OperOffset];
+        DestGrad[OperOffset] += ((DestVal[OperOffset] < 0.f) ? 0.f : 1.f) * ParGrad;
+
         i32 DimMaxNumSoFar = 1;
         for(i32 DimIdx = 1; DimIdx <= (i32)Operand->Header->Dim; ++DimIdx) {
             DimMaxNumSoFar *= Operand->Header->Sizes[Operand->Header->Dim-DimIdx];
@@ -539,6 +572,12 @@ T32Backprop(t32 *RootTensor) {
                 StackBlockPush(&StackState, Operand);
 
                 __T32BackwardSigmoid(Operand, CurrentTensor);
+            } break;
+            case op_UnaryReLU: {
+                t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
+                StackBlockPush(&StackState, Operand);
+
+                __T32BackwardReLU(Operand, CurrentTensor);
             } break;
             case op_BinaryAdd: {
                 StackBlockPush(&StackState, Operands[1]);
