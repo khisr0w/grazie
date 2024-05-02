@@ -9,8 +9,8 @@ RELEASE_DIR := $(BIN_DIR)/release
 
 # Compiler and flags
 CC := clang
-CFLAGS_COMMON := -fno-caret-diagnostics -Wno-null-dereference #/EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208 /wd4505
-CFLAGS_DEBUG := -g #/Od /MTd /Z7 /Zo /DDEBUG
+CFLAGS_COMMON := -fno-caret-diagnostics -Wno-null-dereference -DGRAZIE_PLT_LINUX #/EHa /nologo /FC =
+CFLAGS_DEBUG := -g3 #/Od /MTd /Z7 /Zo /DDEBUG
 CFLAGS_RELEASE := #/O2 /Oi /MT /DRELEASE
 
 ifeq ($(OS),Windows_NT)

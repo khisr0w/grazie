@@ -11,6 +11,12 @@
 #if GRAZIE_PLT_WIN
 #define _CRT_RAND_S /* NOTE(Abid): To use rand_s */
 #endif
+
+#ifdef GRAZIE_PLT_LINUX
+#include <sys/mman.h>
+#include <stddef.h>
+#endif
+
 #include <stdlib.h>
 #include <limits.h>
 #include <stdio.h>
@@ -21,7 +27,7 @@
 /* NOTE(Abid): Unity includes */
 #include "utils.h"
 #include "memory.c"
-#include "tensor.c"
+#include "tensor_expand.c"
 #include "autograd.c"
 #include "loss.c"
 #include "optimizer.c"

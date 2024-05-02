@@ -69,13 +69,14 @@ __PlatformRandom() {
     /* TODO(Abid): The routine returns the status of the generation process and must be asserted.
      *             Link: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/rand-s?view=msvc-170 */
     rand_s(&Number);
-    return Number;
 #endif
 
 #if PLT_LINUX
     /* TODO(Abid): Use https://pubs.opengroup.org/onlinepubs/007908799/xsh/drand48.html */
     Assert(0, "not yet implemented");
 #endif
+
+    return Number;
 }
 
 /* NOTE(Abid): Following will return values from `From` up to, and excluding, `Until`. */

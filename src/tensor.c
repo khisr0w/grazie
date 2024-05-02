@@ -45,7 +45,7 @@
 
 /* NOTE(Abid): The minimum allocated space for Stride/Shape is 2*sizeof(u32),
  *             Since, it will ease up the math computations and allow reshape ops */
-#define __ALLOC_TENSOR_DTYPE(TYPE, StoreGrad) \
+#define __ALLOC_TENSOR_DTYPE(TYPE, StoreGrad, Arena) \
     t32 *Result = NULL; \
     \
     size_t DataSize = 1; \
@@ -62,7 +62,7 @@
                        (i32)StoreGrad*DataSize*sizeof(f32); /* StoreGrad for backprop */ \
     \
     /* NOTE(Abid): Memory mapping */ \
-    Result = (t32 *)Malloc(FinalSize); \
+    Result = (t32 *)PushSize(Arena, FinalSize); \
     Result->Header = (tensor_header *)(Result+1); \
     Assert(Result->Header, "storage memory cannot be allocated"); \
     Result->Header->Sizes = (u32 *)(Result->Header+1); \
@@ -115,26 +115,26 @@
     \
     return Result;
 
-#define T32Data(Shape, Data, TYPE, ShouldGrad) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), ShouldGrad)
-#define T32Empty(Shape, TYPE, ShouldGrad) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), 0, 0, ShouldGrad)
+#define T32Data(Shape, Data, TYPE, ShouldGrad, Arena) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), ShouldGrad, Arena)
+#define T32Empty(Shape, TYPE, ShouldGrad, Arena) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), 0, 0, ShouldGrad, Arena)
 
 internal inline t32 *
-_f32AllocTensor(u32 *Shape, u32 ShapeLength, f32 *Data, size_t DataLength, bool ShouldGrad)
-{ __ALLOC_TENSOR_DTYPE(f32, ShouldGrad); }
+_f32AllocTensor(u32 *Shape, u32 ShapeLength, f32 *Data, size_t DataLength, bool ShouldGrad, mem_arena *Arena)
+{ __ALLOC_TENSOR_DTYPE(f32, ShouldGrad, Arena); }
 
 internal inline t32 *
-_i32AllocTensor(u32 *Shape, u32 ShapeLength, i32 *Data, size_t DataLength, bool ShouldGrad)
-{ __ALLOC_TENSOR_DTYPE(i32, ShouldGrad); }
+_i32AllocTensor(u32 *Shape, u32 ShapeLength, i32 *Data, size_t DataLength, bool ShouldGrad, mem_arena *Arena)
+{ __ALLOC_TENSOR_DTYPE(i32, ShouldGrad, Arena); }
 
 #define ARR(...) __VA_ARGS__
-#define TensorFromArrayLiteral(NAME, DTYPE, Shape, Values, ShouldGrad) \
+#define TensorFromArrayLiteral(NAME, DTYPE, Shape, Values, ShouldGrad, Arena) \
     NULL; \
-    do { \
+    do {  \
         u32 Shape_Arr[] = { Shape }; \
         DTYPE Values_Arr[] = { Values }; \
         NAME = _##DTYPE##AllocTensor(Shape_Arr, ArrayLength(Shape_Arr), \
                                      Values_Arr, ArrayLength(Values_Arr), \
-                                     ShouldGrad); \
+                                     ShouldGrad, Arena); \
     } while(0);
 
 internal inline size_t

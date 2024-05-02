@@ -43,10 +43,11 @@ __T32AddToTensorList(tensor_list *TensorList, t32 *Tensor) {
 }
 
 internal inline tensor_list
-T32AllocateTensorList(usize Size) {
+T32AllocateTensorList(usize Size, mem_arena *Arena) {
     tensor_list TensorList = {0};
     TensorList.Size = Size;
-    TensorList.Array = (t32 **)Malloc(TensorList.Size*sizeof(t32 *));
+    // TensorList.Array = (t32 **)Malloc(TensorList.Size*sizeof(t32 *));
+    TensorList.Array = PushArray(Arena, t32 *, TensorList.Size);
 
     return TensorList;
 }
