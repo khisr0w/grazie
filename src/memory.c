@@ -12,26 +12,22 @@
 #define Free(ptr) free(ptr)
 #define Malloc(ptr) malloc(ptr)
 #define _Calloc(ptr, size) calloc(ptr, size)
-#define Realloc(ptr, size) realloc(ptr, size)
-
-#ifdef GRAZIE_PLT_WIN
-#define PlatformAlloc(Size) Assert(0, "Implement windows allocation here")
-#endif 
-#ifdef GRAZIE_PLT_WIN
-
-#define PlatformAllocte(Size) memset
-#endif 
+#define _Realloc(ptr, size) realloc(ptr, size)
 
 inline internal void *
 PlatoformAllocate(usize Size) {
     void *Result = NULL;
 
 #ifdef GRAZIE_PLT_WIN
-    Assert(0, "Implement windows allocation here")
+    Result = VirtualAlloc(NULL, Size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if(Result == NULL) {
+        GetLastError();
+        exit(EXIT_FAILURE);
+    }
 #endif 
 
 #ifdef GRAZIE_PLT_LINUX
-    Result = mmap(NULL, 1024, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    Result = mmap(NULL, Size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if(Result == MAP_FAILED) {
         perror("mmap");
         exit(EXIT_FAILURE);
@@ -44,9 +40,9 @@ PlatoformAllocate(usize Size) {
 internal mem_arena
 AllocateArena(usize BytesToAllocate) {
     mem_arena Arena = {0};
+    Arena.MaxSize = BytesToAllocate;
     Arena.Ptr = PlatoformAllocate(Arena.MaxSize);
     Arena.Used = 0;
-    Arena.MaxSize = BytesToAllocate;
 
     return Arena;
 }
@@ -90,9 +86,8 @@ AligmentOffset(mem_arena *Arena, usize Alignment) {
 internal void *
 PushSize(mem_arena *Arena, usize Size) {
     Assert(Arena->Used + Size < Arena->MaxSize, "not enough arena memory");
-    void *Result = Arena->Ptr + Arena->Used;
+    void *Result = (u8 *)Arena->Ptr + Arena->Used;
     Arena->Used += Size;
 
     return Result;
 }
-

@@ -24,6 +24,7 @@ typedef enum {
     op_UnaryReduceSumAll,
     op_UnarySigmoid,
     op_UnaryReLU,
+    op_UnaryView,
 
     op_UnaryEnd, /* NOTE(Abid): Marks the num after the end of unary ops, WARNING: should not be moved! */
 
@@ -59,7 +60,7 @@ typedef struct {
     u32 Dim;
     u32 Offset;
 
-    /* NOTE(Abid): This is stricly for optimizing math ops, so we don't allocate. */
+    /* NOTE(Abid): This is stricly for optimizing math ops, so we don't allocate. TODO: Must remove */
     u32 *AccessSizes; 
     size_t StorageNumElements;
 

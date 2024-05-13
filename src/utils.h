@@ -8,17 +8,29 @@
 
 #if !defined(UTILS_H)
 
-#ifdef GRAZIE_ASSERT
-#define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\n", __FILE__, __LINE__); *(i32 *)0 = 0; }
-#else
-#define Assert(Expr, ErrorStr) if(!(Expr)) {fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", __FILE__, __LINE__); exit(-1);}
-#endif
+/* TODO(Abid): Add a release flag to remove all the asserts. */
 
 #ifdef GRAZIE_DEBUG
-#define InvalidCodePath *(i32 *)0 = 0
-#else
-#define InvalidCodePath do { fprintf(stderr, "Invalid Path (%s:%d): \nExiting...\n", __FILE__, __LINE__); exit(-1); } while(0)
 #endif
+
+#ifdef GRAZIE_ASSERT
+#define Assert(Expr, ErrorStr, ...) \
+    if((Expr)) { } \
+    else { \
+        fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\n", \
+                __FILE__, __LINE__, ##__VA_ARGS__); \
+        *(i32 *)0 = 0; \
+    }
+#else
+#define Assert(Expr, ErrorStr, ...) \
+    if((Expr)) { } \
+    else { \
+        fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", \
+                __FILE__, __LINE__, ##__VA_ARGS__); \
+        exit(EXIT_FAILURE); \
+    }
+#endif
+
 
 
 #define ArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
@@ -34,6 +46,8 @@
 #define GetSizeR(A, IDX) ((A)->Header->Sizes[(A)->Header->Dim-(IDX)-1])
 
 /* NOTE(Abid): typedef and static define for ease of use */
+typedef uint8_t u8;
+typedef int8_t i8;
 typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int32_t i32;

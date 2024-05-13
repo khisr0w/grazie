@@ -579,6 +579,10 @@ T32Backprop(t32 *RootTensor) {
 
                 __T32BackwardReLU(Operand, CurrentTensor);
             } break;
+            case op_UnaryView: {
+                t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
+                StackBlockPush(&StackState, Operand);
+            } break;
             case op_BinaryAdd: {
                 StackBlockPush(&StackState, Operands[1]);
                 StackBlockPush(&StackState, Operands[0]);

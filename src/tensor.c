@@ -93,19 +93,16 @@
     Result->Header->Dim = ShapeLength; \
     memcpy(Result->Header->Sizes, Shape, AllocShapeLength*sizeof(u32)); \
     \
-    /* TODO(Abid): When this routine gets de-coupled to separate header and data allocation process, then
-     *             the stride calculation must also be altered to account for non-contiguous storages. */ \
-    /* NOTE(Abid): Calculate the strides given the tensor shape */ \
-    for(u32 i = 0; i < Result->Header->Dim; ++i) { \
-        if(Result->Header->Sizes[i] == 1) Result->Header->Strides[i] = 0; \
-        else Result->Header->Strides[i] = 1; \
-    } \
-    if(Result->Header->Dim > 1) { \
-        /* NOTE(Abid): If the size in a dim is 1, then the stride will be zero */ \
-        for(u32 i = 0; i < (Result->Header->Dim-1); ++i) \
-                for(u32 j = i+1; j < Result->Header->Dim; ++j) { Result->Header->Strides[i] *= \
-                                                                    Result->Header->Sizes[j]; } \
-    } \
+    /* NOTE(Abid): Calculate the strides given the tensor shape */      \
+    for(u32 Idx = 0; Idx < Result->Header->Dim; ++Idx) {                \
+        if(Result->Header->Sizes[Idx] == 1) {                           \
+            Result->Header->Strides[Idx] = 0;                           \
+            continue;                                                   \
+        } else Result->Header->Strides[Idx] = 1;                        \
+        for(u32 Jdx = Idx+1; Jdx < Result->Header->Dim; ++Jdx) {        \
+            Result->Header->Strides[Idx] *= Result->Header->Sizes[Jdx]; \
+        }                                                               \
+    }                                                                   \
     \
     if(Data) { \
         /* NOTE(Abid): Check if the DataLength makes sense with the shape */ \
@@ -117,6 +114,20 @@
 
 #define T32Data(Shape, Data, TYPE, ShouldGrad, Arena) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), Data, ArrayLength(Data), ShouldGrad, Arena)
 #define T32Empty(Shape, TYPE, ShouldGrad, Arena) _##TYPE##AllocTensor(Shape, ArrayLength(Shape), 0, 0, ShouldGrad, Arena)
+
+internal void
+T32CalculateStride(u32 *Strides, u32 *Sizes, u32 Dim) {
+    /* NOTE(Abid): Calculate the strides given the tensor shape */
+    for(u32 Idx = 0; Idx < Dim; ++Idx) {
+        if(Sizes[Idx] == 1) {
+            Strides[Idx] = 0;
+            continue;
+        } else Strides[Idx] = 1;
+        for(u32 Jdx = Idx+1; Jdx < Dim; ++Jdx) {
+            Strides[Idx] *= Sizes[Jdx];
+        }
+    }
+}
 
 internal inline t32 *
 _f32AllocTensor(u32 *Shape, u32 ShapeLength, f32 *Data, size_t DataLength, bool ShouldGrad, mem_arena *Arena)
@@ -162,6 +173,22 @@ IsArrayEqual(u32 *Array1, u32 *Array2, u32 Array1Length, u32 Array2Length) {
 internal inline bool
 IsShapeEqual(tensor_header *A, tensor_header *B) { return IsArrayEqual(A->Sizes, B->Sizes, A->Dim, B->Dim); }
 
+/* TODO(Abid): Implement for unit testing */
+#if 0
+internal inline bool
+T32IsClose(t32 *A, t32 *B) {
+    bool Result = true;
+
+    Assert(IsShapeEqual(A->Header, B->Header), "tensors of comparison must be the same shape");
+    usize NumElements = A->Header->StorageNumElements;
+    for(usize Idx = 0; Idx < NumElements; ++Idx) {
+    }
+
+    return Result;
+}
+#endif
+
+
 #define __PRINT_DTYPE(TEN_NAME, PRINT_FORMAT, TYPE) \
     printf(TEN_NAME); \
     printf(" -> shape ("); \
@@ -201,8 +228,7 @@ IsShapeEqual(tensor_header *A, tensor_header *B) { return IsArrayEqual(A->Sizes,
     } \
     printf("\n\n")
 internal void
-T32Print(t32 *A)
-{
+T32Print(t32 *A) {
     i32 MaxPrintWidth = 20;
     i32 PrintCount = 0;
 
@@ -313,7 +339,7 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
  *             run a for loop instead of calculating the next element each time, this will work since for shape=1,
  *             the stride will be zero. */
 #define __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, A_DTYPE, B_DTYPE, R_DTYPE, OP) \
-    while(ResDataLeft >= 0) { \
+    while(ResDataLeft > 0) { \
         *((R_DTYPE *)Result->Data.Ptr + ResultOffset) = (R_DTYPE)(*((A_DTYPE *)A->Data.Ptr + AOffset) OP \
                                                        *((B_DTYPE *)B->Data.Ptr + BOffset)); \
         i32 ACurrentDim = (i32)A->Header->Dim - DimIdx; \
@@ -374,7 +400,7 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
         case bin_op_dtypes_float_int_int:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, f32, i32, i32, OP); } break; \
         case bin_op_dtypes_int_float_float: { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, i32, f32, f32, OP); } break; \
         case bin_op_dtypes_int_float_int:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, i32, f32, i32, OP); } break; \
-        default:                            InvalidCodePath; \
+        default:                            Assert(0, "Invalid Code Path");                                         \
     }
 typedef enum {
     bin_op_dtypes_all_float = 0,
@@ -622,7 +648,7 @@ T32MatMul(t32 *A, t32 *B, t32 *Result) {
         case bin_op_dtypes_float_int_int:   { __BIN_MATMUL_DTYPE(A, B, Result, f32, i32, i32, =); } break;
         case bin_op_dtypes_int_float_float: { __BIN_MATMUL_DTYPE(A, B, Result, i32, f32, f32, =); } break;
         case bin_op_dtypes_int_float_int:   { __BIN_MATMUL_DTYPE(A, B, Result, i32, f32, i32, =); } break;
-        default:                            InvalidCodePath;
+        default:                            Assert(0, "Invalid Code Path");
     }
 
     Result->Header->DerivedOp.TensorOp = op_BinaryMatmul;
@@ -710,7 +736,7 @@ __T32MatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
         case bin_op_dtypes_float_int_int:   { __BIN_MATMUL_DTYPE(A, B, Result, f32, i32, i32, +=); } break;
         case bin_op_dtypes_int_float_float: { __BIN_MATMUL_DTYPE(A, B, Result, i32, f32, f32, +=); } break;
         case bin_op_dtypes_int_float_int:   { __BIN_MATMUL_DTYPE(A, B, Result, i32, f32, i32, +=); } break;
-        default:                            InvalidCodePath;
+        default:                            Assert(0, "Invalid Code Path");
     }
 }
 #undef __BIN_MATMUL_DTYPE
@@ -824,6 +850,66 @@ __LossLogOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHead
 /* =======================================
  * NOTE(Abid): Reshaping Operations
  * ======================================= */
+
+/* NOTE(Abid): Check if the proposed view fits the data of the original tensor */
+internal bool
+T32ValidateViewOnTensor(t32 *A, u32 *NewShape, u32 NewShapeLength) {
+    usize ViewExpectedNumElements = 1;
+    for(u32 Idx = 0; Idx < NewShapeLength; ++Idx) {
+        ViewExpectedNumElements *= NewShape[Idx];
+    }
+
+    return ViewExpectedNumElements == A->Header->StorageNumElements;
+}
+
+#define T32NewView(A, NewShape, Arena) _T32NewView(A, NewShape, ArrayLength(NewShape), Arena)
+internal t32 *
+_T32NewView(t32 *A, u32 *NewShape, u32 NewShapeLength, mem_arena *Arena) {
+    Assert(A->Header->IsContiguous, "view a of non-contiguous tensor not allowed");
+    Assert(NewShapeLength > 0, "invalid view, dim cannot be %d", NewShapeLength);
+    Assert(T32ValidateViewOnTensor(A, NewShape, NewShapeLength), "invalid view, shape-storage mismatch")
+
+    t32 *Result = PushStruct(Arena, t32);
+    Result->Header = PushStruct(Arena, tensor_header);
+
+    /* NOTE(Abid): Copy storage pointer and dtype */
+    Result->Data.DType = A->Data.DType;
+    Result->Data.Ptr = A->Data.Ptr;
+    Result->Grad.DType = A->Grad.DType;
+    Result->Grad.Ptr = A->Grad.Ptr;
+
+    /* NOTE(Abid): Copy tensor_header data */
+    Result->Header->Dim = NewShapeLength;
+    Result->Header->Offset = A->Header->Offset;
+    Result->Header->ShouldGrad = A->Header->ShouldGrad;
+    Result->Header->IsContiguous = A->Header->IsContiguous;
+    Result->Header->StorageNumElements = A->Header->StorageNumElements;
+
+    /* NOTE(Abid): Stride and Sizes TODO: Must remove AccessSizes */
+    Result->Header->Sizes = PushArray(Arena, u32, 3*NewShapeLength);
+    Result->Header->Strides = Result->Header->Sizes + NewShapeLength;
+    Result->Header->AccessSizes = Result->Header->Strides + NewShapeLength;
+    memcpy(Result->Header->Sizes, NewShape, NewShapeLength*sizeof(u32));
+    T32CalculateStride(Result->Header->Strides, Result->Header->Sizes, Result->Header->Dim);
+
+    /* NOTE(Abid): Derived ops operand(s) */
+    Result->Header->DerivedOp.TensorOp = op_UnaryView;
+    /* TODO(Abid): Could we just allocate ONE operand instead of two */
+    Result->Header->DerivedOp.Operands = PushArray(Arena, t32 *, 2);
+    Result->Header->DerivedOp.Operands[0] = A;
+
+    return Result;
+}
+
+/* NOTE(Abid): Trim the trailing size of the tensor if the last size is unity (1) */
+internal t32 *
+T32TrimUnitSize(t32 *A, mem_arena *Arena) {
+    bool IsValid = (A->Header->Dim > 1) && (A->Header->Sizes[A->Header->Dim-1] == 1);
+    Assert(IsValid, "cannot trim, trailing size is %d, with dim %d",
+           A->Header->Sizes[A->Header->Dim-1], A->Header->Dim);
+
+    return _T32NewView(A, A->Header->Sizes, A->Header->Dim-1, Arena);
+}
 
 internal inline bool
 IsContiguous(t32 A) {

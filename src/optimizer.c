@@ -10,8 +10,8 @@
 
 typedef struct {
     t32 **Array;
-    usize Size;
-    usize Ptr;
+    usize MaxSize;
+    usize Used;
 } tensor_list;
 
 #if 0
@@ -33,21 +33,23 @@ internal inline void
 __T32AddToTensorList(tensor_list *TensorList, t32 *Tensor) {
     Assert(TensorList->Array != NULL, "cannot add tensor to an NULL tensor_list");
 
-    if(TensorList->Ptr+1 == TensorList->Size) {
-        TensorList->Size += TensorList->Size; /* Factorial increase TODO(Abid): A better solution */
-        TensorList->Array = (t32 **)Realloc(TensorList->Array, TensorList->Size);
+    Assert(TensorList->Used+1 != TensorList->MaxSize, "");
+    /* TODO(Abid): Must remove this entire if clause, we are using arenas now. */
+    if(TensorList->Used+1 == TensorList->MaxSize) {
+        TensorList->MaxSize += TensorList->MaxSize; /* Factorial increase TODO(Abid): A better solution */
+        // TensorList->Array = (t32 **)Realloc(TensorList->Array, TensorList->MaxSize);
         Assert(TensorList->Array, "Realloc failed to move memory");
     }
 
-    TensorList->Array[TensorList->Ptr++] = Tensor;
+    TensorList->Array[TensorList->Used++] = Tensor;
 }
 
 internal inline tensor_list
 T32AllocateTensorList(usize Size, mem_arena *Arena) {
     tensor_list TensorList = {0};
-    TensorList.Size = Size;
+    TensorList.MaxSize = Size;
     // TensorList.Array = (t32 **)Malloc(TensorList.Size*sizeof(t32 *));
-    TensorList.Array = PushArray(Arena, t32 *, TensorList.Size);
+    TensorList.Array = PushArray(Arena, t32 *, TensorList.MaxSize);
 
     return TensorList;
 }
@@ -80,11 +82,21 @@ T32ToggleOptimWatch(bool Start) {
 }
 #endif
 
+internal inline void
+T32ZeroGrad(tensor_list TensorList) {
+    for(u32 TensorIdx = 0; TensorIdx < TensorList.Used; ++TensorIdx) {
+        t32 *Tensor = TensorList.Array[TensorIdx];
+        for(usize DataIdx = 0; DataIdx < Tensor->Header->StorageNumElements; ++DataIdx) {
+            ((f32 *)Tensor->Grad.Ptr)[DataIdx] = 0.f;
+        }
+    }
+}
+
 internal void
 T32SGDOptim(tensor_list TensorList, f32 LearningRate) {
     /* TODO(Abid): Add nesterov momentum as well as weight decay. */
 
-    for(u32 TensorIdx = 0; TensorIdx < TensorList.Ptr; ++TensorIdx) {
+    for(u32 TensorIdx = 0; TensorIdx < TensorList.Used; ++TensorIdx) {
         t32 *Tensor = TensorList.Array[TensorIdx];
         size_t NumData = Tensor->Header->StorageNumElements;
         size_t Offset = 0;

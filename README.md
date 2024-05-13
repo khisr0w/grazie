@@ -1,20 +1,12 @@
 # grazie (`grad-c`)
-A simple, bare-bones, single-threaded, CPU-based (for now) tensor and autograd library I'm building in my spare time. The code is pure C without the use of any libararies (except for C-runtime).
+A simple, bare-bones, CPU-based (for now) tensor and autograd library I'm building in my spare time. The code is pure C without the use of any libararies (except for C-runtime).
 
-The goal of the project is not to build a competitor to any neural network frameworks, but rather an excercise to learn the fundamentals of mathematics that goes into tensor operations used for training neural networks.
-As a result, no emphasis has been put into optimization (although that is something I wish to come back to)
+The goal of the project is not to build a competitor to any neural network frameworks, but rather an excercise to learn the fundamentals of mathematics that goes into tensor operations used for training neural networks, while also creating a minimalist deep learning toolset with efficiency at its core.
+That means there will be NO memory allocation during training of inference, and NO arbitracy "convenient" kernel implemented.
 
 ## Current Status
-At the moment, the project has the most fundamental tensor operations implemented, with certain omissions. The tensors operation currently supported are:
-- Addition
-- Subtraction
-- Multiplication
-- Division
-- Broadcasting Semantics
-- Matrix Multiplication
-- Transpose (Arbitrary Dimensions)
+At the moment, the project has the most fundamental tensor operations implemented, as well as a version of reverse-mode automatic differentiation and backpropagation.
 
-More importantly, every tensor operation has a corresponding backward implementation which generates the Jacobian of the tensor for backpropagation.
 
 #### The current short-term focus of the project is to:
 - Train an XOR classifier as a test 
@@ -26,6 +18,51 @@ More importantly, every tensor operation has a corresponding backward implementa
 - Introduce multi-threading at some point (mutexes will be fun -_-)
 
 ## Examples
+#### Sample Training of a Linear Module with Arena-based memory management
+```C
+#include "grazie.h"
+
+i32 main() {
+    mem_arena MainArena = AllocateArena(Megabyte(100));
+
+    u32 InputShape[] = {5, 7};
+    f32 InputData[] = {
+        0.3978f, -1.1573f,  0.5564f,  1.4209f,  0.6619f,  1.2710f,  1.0088f,
+        0.6431f, -0.7379f, -0.2102f, -0.1002f, -2.2516f, -1.1144f, -1.2046f,
+        0.5182f, -0.7396f,  0.1325f,  2.8119f, -0.2471f, -0.2388f,  1.0221f,
+        0.2247f, -0.0725f,  0.6489f,  0.6703f, -2.3605f, -0.9891f,  0.3283f,
+       -0.2900f,  0.9854f,  0.7036f,  0.4051f, -0.2086f, -0.7467f, -0.5946f
+    };
+    t32 *Input = T32Data(InputShape, InputData, f32, true, &MainArena);
+
+    /* NOTE(Abid): Model definition */
+    module *Lin1 = T32Linear(7, 6, &MainArena);
+    tensor_list OptimList = T32AllocateTensorList(1024, &MainArena);
+    /* NOTE(Abid): Temporary measure */
+    __T32AddToTensorList(&OptimList, Lin1->TensorList.Array[0]);
+    __T32AddToTensorList(&OptimList, Lin1->TensorList.Array[1]);
+
+    /* NOTE(Abid): Training loop */
+    for(u32 Idx = 0; Idx < 10; ++Idx) {
+        temp_memory TempSession = BeginTempMemory(&MainArena);
+
+        T32ZeroGrad(OptimList);
+        t32 *Output = RunModule(Lin1, Input, &MainArena);
+        u32 LossShape[] = {1};
+        t32 *Loss = T32Empty(LossShape, f32, true, &MainArena);
+        T32ReduceSumAll(Output, Loss);
+
+        T32Backprop(Loss);
+        T32SGDOptim(OptimList, 0.1f);
+
+        EndTempMemory(TempSession);
+    }
+    T32Print(Lin1->TensorList.Array[0]);
+    T32Print(Lin1->TensorList.Array[1]);
+
+    return(0);
+}
+```
 #### Backpropagation of a Matrix Multiplication with Broadcast Support
 ```C
 #include "grazie.h"
