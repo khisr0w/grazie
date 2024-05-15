@@ -2,7 +2,7 @@
 A simple, bare-bones, CPU-based (for now) tensor and autograd library I'm building in my spare time. The code is pure C without the use of any libararies (except for C-runtime).
 
 The goal of the project is not to build a competitor to any neural network frameworks, but rather an excercise to learn the fundamentals of mathematics that goes into tensor operations used for training neural networks, while also creating a minimalist deep learning toolset with efficiency at its core.
-That means there will be NO memory allocation during training of inference, and NO arbitracy "convenient" kernel implemented.
+That means there will be NO memory allocation during training or inference, and NO arbitrary "convenient" kernel implemented.
 
 ## Current Status
 At the moment, the project has the most fundamental tensor operations implemented, as well as a version of reverse-mode automatic differentiation and backpropagation.
