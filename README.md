@@ -23,7 +23,7 @@ At the moment, the project has the most fundamental tensor operations implemente
 #include "grazie.h"
 
 i32 main() {
-mem_arena MainArena = gzMemArenaAllocate(gzMegabyte(100));
+    mem_arena MainArena = gzMemArenaAllocate(gzMegabyte(100));
 
     /* NOTE(Abid): Input */
     u32 InputShape[] = {5, 7};
