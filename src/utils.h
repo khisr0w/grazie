@@ -33,27 +33,28 @@
 
 
 
-#define ArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
+#define gzArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
 
 /* NOTE(Abid): Byte Macros */
-#define Kilobyte(Value) ((Value)*1024LL)
-#define Megabyte(Value) (Kilobyte(Value)*1024LL)
-#define Gigabyte(Value) (Megabyte(Value)*1024LL)
-#define Terabyte(Value) (Gigabyte(Value)*1024LL)
+#define gzKilobyte(Value) ((Value)*1024LL)
+#define gzMegabyte(Value) (gzKilobyte(Value)*1024LL)
+#define gzGigabyte(Value) (gzMegabyte(Value)*1024LL)
+#define gzTerabyte(Value) (gzGigabyte(Value)*1024LL)
 
 /* NOTE(Abid): Get Stride and Sizes, WARNING(Abid): The indexing starts from the right side */
 #define GetStrideR(A, IDX) ((A)->Header->Strides[(A)->Header->Dim-(IDX)-1])
 #define GetSizeR(A, IDX) ((A)->Header->Sizes[(A)->Header->Dim-(IDX)-1])
 
 /* NOTE(Abid): typedef and static define for ease of use */
-typedef uint8_t u8;
-typedef int8_t i8;
-typedef uint32_t u32;
 typedef uint64_t u64;
-typedef int32_t i32;
+typedef uint32_t u32;
+typedef uint16_t u16;
+typedef uint8_t u8;
 typedef int64_t i64;
-typedef float f32;
+typedef int32_t i32;
+typedef int8_t i8;
 typedef double f64;
+typedef float f32;
 typedef uintptr_t uintptr;
 typedef int8_t bool;
 typedef size_t usize;
@@ -67,7 +68,8 @@ typedef size_t usize;
 #define GRAD_PRESERVE(Value) __GetSetGradState(true, Value)
 #define GRAD_PRESERVE_TOGGLE() __GetSetGradState(true, !IS_GRAD_PRESERVE())
 #define IS_GRAD_PRESERVE() (__GetSetGradState(false, 0))
-internal inline bool
+
+inline internal bool
 __GetSetGradState(bool Set, bool NewState) {
     local_persist bool ShouldGrad = true;
 
@@ -76,40 +78,44 @@ __GetSetGradState(bool Set, bool NewState) {
     return ShouldGrad;
 }
 
-internal inline u32
-__PlatformRandom() {
-    u32 Number;
-#if GRAZIE_PLT_WIN
-    /* TODO(Abid): The routine returns the status of the generation process and must be asserted.
-     *             Link: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/rand-s?view=msvc-170 */
-    rand_s(&Number);
-#endif
+typedef struct {
+    f64 Latest;
+    f64 Sum;
+    f64 SumSquared;
+    u64 Count;
+    f64 Max;
+    f64 Min;
+} f64_stat;
+inline internal void
+gzStatAccumulate(f64 Value, f64_stat *Stat) {
+    if(Stat->Count == 0) {
+        Stat->Max = Value;
+        Stat->Min = Value;
+    }
 
-#if PLT_LINUX
-    /* TODO(Abid): Use https://pubs.opengroup.org/onlinepubs/007908799/xsh/drand48.html */
-    Assert(0, "not yet implemented");
-#endif
-
-    return Number;
+    Stat->Latest = Value;
+    Stat->SumSquared += Value*Value;
+    Stat->Sum += Value;
+    ++Stat->Count;
 }
 
-/* NOTE(Abid): Following will return values from `From` up to, and excluding, `Until`. */
-internal inline i32
-RandUniformInt32(i32 From, i32 Until) {
-    Assert(From <= Until, "starting interval cannot be larger than ending interval");
-
-    i32 Diff = Until - From;
-    double RandDouble = (double)__PlatformRandom() / ((double)UINT_MAX + 1);
-    return From + (i32)(RandDouble * Diff);
+inline internal f64
+gzStatMean(f64_stat *Stat) {
+    Assert(Stat->Count > 0, "cannot calculate mean for count < 1");
+    return Stat->Sum / Stat->Count;
 }
 
-internal inline f32
-RandUniformFloat32(f32 From, f32 Until) {
-    Assert(From <= Until, "starting interval cannot be larger than ending interval");
+inline internal f64
+gzStatVar(f64_stat *Stat) {
+    Assert(Stat->Count > 0, "Cannot calculate variance for count < 1.");
+    f64 StatMean = gzStatMean(Stat);
+    return (Stat->SumSquared - 2 * StatMean * (Stat->Sum) + Stat->Count*(StatMean*StatMean)) / max(Stat->Count - 1, 1);
+}
 
-    f32 Diff = Until - From;
-    double RandDouble = (double)__PlatformRandom() / ((double)UINT_MAX + 1);
-    return From + (f32)(RandDouble * Diff);
+inline internal f64
+gzStatStd(f64_stat *Stat) {
+    Assert(Stat->Count > 0, "Cannot calculate std for count < 1.");
+    return sqrt(gzStatVar(Stat));
 }
 
 #define UTILS_H

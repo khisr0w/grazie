@@ -16,6 +16,10 @@ CFLAGS_RELEASE := #/O2 /Oi /MT /DRELEASE
 ifeq ($(OS),Windows_NT)
 EXECUTABLE := grazie.exe
 CC := cl
+CL := link
+LFLAGS_COMMON := /nologo Bcrypt.lib
+LFLAGS_DEBUG := /DEBUG
+LFLAGS_RELEASE :=
 CFLAGS_COMMON := /EHa /nologo /FC /Zo /WX /W4 /Gm- /wd5208 /wd4505 /wd4127 /DGRAZIE_PLT_WIN /DGRAZIE_ASSERT
 CFLAGS_DEBUG := /Od /MTd /Z7 /Zo /DGRAZIE_DEBUG
 CFLAGS_RELEASE := /O2 /Oi /MT /DGRAZIE_RELEASE
@@ -63,7 +67,7 @@ endif
 $(EXECUTABLE_DEUBG): $(OBJECTS_DEBUG)
 	@echo "    [Debug] Linking Objects for executable..."
 ifeq ($(OS),Windows_NT)
-	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) /Fe$@ $^
+	@$(CL) $^ /OUT:$@ $(LFLAGS_COMMON) $(LFLAGS_DEBUG)
 else
 	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) $^ -o $@
 endif
@@ -89,7 +93,7 @@ endif
 $(EXECUTABLE_RELEASE): $(OBJECTS_RELEASE)
 	@echo "    Linking Objects for executable..."
 ifeq ($(OS),Windows_NT)
-	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) /Fe$@ $^
+	@$(CL) $^ /OUT:$@ $(LFLAGS_COMMON) $(LFLAGS_RELEASE)
 else
 	@$(CC) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) $^ -o $@
 endif

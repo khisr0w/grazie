@@ -8,52 +8,6 @@
 
 #include "optimizer.h"
 
-typedef struct {
-    t32 **Array;
-    usize MaxSize;
-    usize Used;
-} tensor_list;
-
-#if 0
-internal tensor_list *
-__GLOBALCurrentOptimizerList(tensor_list *NewList, bool ShouldChange) {
-    local_persist tensor_list CurrentList;
-    if(NewList != NULL) {
-        Assert(ShouldChange, "optimizer list cannot be changed. Forgot `ShouldChange`?")
-        CurrentList.Array = NewList->Array;
-        CurrentList.Size = NewList->Size;
-        CurrentList.Ptr = NewList->Ptr;
-    }
-
-    return &CurrentList;
-}
-#endif
-
-internal inline void
-__T32AddToTensorList(tensor_list *TensorList, t32 *Tensor) {
-    Assert(TensorList->Array != NULL, "cannot add tensor to an NULL tensor_list");
-
-    Assert(TensorList->Used+1 != TensorList->MaxSize, "");
-    /* TODO(Abid): Must remove this entire if clause, we are using arenas now. */
-    if(TensorList->Used+1 == TensorList->MaxSize) {
-        TensorList->MaxSize += TensorList->MaxSize; /* Factorial increase TODO(Abid): A better solution */
-        // TensorList->Array = (t32 **)Realloc(TensorList->Array, TensorList->MaxSize);
-        Assert(TensorList->Array, "Realloc failed to move memory");
-    }
-
-    TensorList->Array[TensorList->Used++] = Tensor;
-}
-
-internal inline tensor_list
-T32AllocateTensorList(usize Size, mem_arena *Arena) {
-    tensor_list TensorList = {0};
-    TensorList.MaxSize = Size;
-    // TensorList.Array = (t32 **)Malloc(TensorList.Size*sizeof(t32 *));
-    TensorList.Array = PushArray(Arena, t32 *, TensorList.MaxSize);
-
-    return TensorList;
-}
-
 #if 0
 internal tensor_list
 T32ToggleOptimWatch(bool Start) {
@@ -83,7 +37,7 @@ T32ToggleOptimWatch(bool Start) {
 #endif
 
 internal inline void
-T32ZeroGrad(tensor_list TensorList) {
+gzGradZero(tensor_list TensorList) {
     for(u32 TensorIdx = 0; TensorIdx < TensorList.Used; ++TensorIdx) {
         t32 *Tensor = TensorList.Array[TensorIdx];
         for(usize DataIdx = 0; DataIdx < Tensor->Header->StorageNumElements; ++DataIdx) {
@@ -93,7 +47,7 @@ T32ZeroGrad(tensor_list TensorList) {
 }
 
 internal void
-T32SGDOptim(tensor_list TensorList, f32 LearningRate) {
+gzOptimSGD(tensor_list TensorList, f32 LearningRate) {
     /* TODO(Abid): Add nesterov momentum as well as weight decay. */
 
     for(u32 TensorIdx = 0; TensorIdx < TensorList.Used; ++TensorIdx) {

@@ -8,11 +8,13 @@
 
 #include "autograd.h"
 
+/* TODO(Abid): This file requires HEAVY refactoring, as well as standardizing namespace. */
+
 internal inline bool
-IsStackBlocksEmpty(stack_blocks_state *State) { return State->RunningTensorNum == 0; }
+gzIsStackBlocksEmpty(stack_blocks_state *State) { return State->RunningTensorNum == 0; }
 
 internal inline stack_block *
-AllocNewStackBlock(size_t MaxNumTensors, stack_block *BelowBlock) {
+gzAllocNewStackBlock(size_t MaxNumTensors, stack_block *BelowBlock) {
     stack_block *Result = (stack_block *)Malloc(MaxNumTensors*sizeof(t32 *) + sizeof(stack_block));
     Assert(Result, "failed to allocate stack block");
     Result->TensorPtr = (t32 **)(Result+1);
@@ -23,7 +25,7 @@ AllocNewStackBlock(size_t MaxNumTensors, stack_block *BelowBlock) {
 }
 
 internal inline void
-StackBlockPush(stack_blocks_state *State, t32 *Tensor) {
+gzStackBlockPush(stack_blocks_state *State, t32 *Tensor) {
     if(!State->CurrentBlock || State->CurrentBlock->MaxNumTen ==
                                State->CurrentBlockTopIdx+1) {
         /* NOTE(Abid): In case, we do not have any blocks, or if the block is full */
@@ -36,7 +38,7 @@ StackBlockPush(stack_blocks_state *State, t32 *Tensor) {
         } else {
             /* TODO(Abid): Tweak the NewAllocTensorNum growth factor to something reasonable */
             State->NewAllocTensorNum += (i32)(State->NewAllocTensorNum/2);
-            NewBlock = AllocNewStackBlock(State->NewAllocTensorNum, State->CurrentBlock);
+            NewBlock = gzAllocNewStackBlock(State->NewAllocTensorNum, State->CurrentBlock);
         }
         State->CurrentBlock = NewBlock;
         State->CurrentBlockTopIdx = (size_t)-1;
@@ -48,7 +50,7 @@ StackBlockPush(stack_blocks_state *State, t32 *Tensor) {
 }
 
 internal inline void
-StackBlockPop(stack_blocks_state *State) {
+gzStackBlockPop(stack_blocks_state *State) {
     Assert(State->RunningTensorNum > 0, "cannot pop empty stack");
     --State->CurrentBlockTopIdx;
     --State->RunningTensorNum;
@@ -67,7 +69,7 @@ StackBlockPop(stack_blocks_state *State) {
 }
 
 internal inline t32 *
-StackBlockTop(stack_blocks_state *State) {
+gzStackBlockTop(stack_blocks_state *State) {
     Assert(State->RunningTensorNum > 0, "cannot get top of an empty stack");
     return State->CurrentBlock->TensorPtr[State->CurrentBlockTopIdx];
 }
@@ -76,36 +78,36 @@ StackBlockTop(stack_blocks_state *State) {
  * NOTE(Abid): Backward Operations
  * ============================================ */
 
-#define __BACKWARD_OP_ELEMENTS_SCALAR(A, Value, OP) \
+#define __GZ_BACKWARD_OP_ELEMENTS_SCALAR(A, Value, OP) \
     f32 TempVal = Value; \
     f32 *StoragePtr = (f32 *)A->Grad.Ptr; \
     for(i32 Idx = 0; Idx < A->Header->StorageNumElements; ++Idx) \
         StoragePtr[Idx] OP TempVal;
 internal inline void
-__BackwardT32AddToElements(t32 *A, f32 Value)
-{ __BACKWARD_OP_ELEMENTS_SCALAR(A, Value, +=); }
+__gzBackwardAddToElements(t32 *A, f32 Value)
+{ __GZ_BACKWARD_OP_ELEMENTS_SCALAR(A, Value, +=); }
 
 internal inline void
-__BackwardT32SubToElements(t32 *A, f32 Value)
-{ __BACKWARD_OP_ELEMENTS_SCALAR(A, Value, -=); }
+__gzBackwardSubToElements(t32 *A, f32 Value)
+{ __GZ_BACKWARD_OP_ELEMENTS_SCALAR(A, Value, -=); }
 
 internal inline void
-__BackwardT32MulToElements(t32 *A, f32 Value)
-{ __BACKWARD_OP_ELEMENTS_SCALAR(A, Value, *=); }
+__gzBackwardMulToElements(t32 *A, f32 Value)
+{ __GZ_BACKWARD_OP_ELEMENTS_SCALAR(A, Value, *=); }
 
 internal inline void
-__BackwardT32DivToElements(t32 *A, f32 Value)
-{ __BACKWARD_OP_ELEMENTS_SCALAR(A, Value, /=); }
+__gzBackwardDivToElements(t32 *A, f32 Value)
+{ __GZ_BACKWARD_OP_ELEMENTS_SCALAR(A, Value, /=); }
 
 internal inline void
-__BackwardT32SetElements(t32 *A, f32 Value)
-{ __BACKWARD_OP_ELEMENTS_SCALAR(A, Value, =); }
-#undef __BACKWARD_OP_ELEMENTS_SCALAR
+__gzBackwardSetElements(t32 *A, f32 Value)
+{ __GZ_BACKWARD_OP_ELEMENTS_SCALAR(A, Value, =); }
+#undef __GZ_BACKWARD_OP_ELEMENTS_SCALAR
 
 /* NOTE(Abid): The following operation does a reduce sum on the broadcast dims of A and add/sub/mul/div
  *             it to Result tensor. There is a faster way to do it, but that most likely requires a
  *             malloc which I shall never do. */
-#define __REDUCE_BROADCAST_DIMS(A, Result, OP) \
+#define __GZ_REDUCE_BROADCAST_DIMS(A, Result, OP) \
     Assert(A->Header->Dim >= Result->Header->Dim, "result tensor cannot be higher than operand"); \
     size_t ANumData = A->Header->StorageNumElements; \
     \
@@ -129,12 +131,12 @@ __BackwardT32SetElements(t32 *A, f32 Value)
         } \
     }
 internal void 
-__BackwardT32ReduceAddBroadcast(t32 *A, t32 *Result) { __REDUCE_BROADCAST_DIMS(A, Result, +=); }
+__gzBackwardReduceAddBroadcast(t32 *A, t32 *Result) { __GZ_REDUCE_BROADCAST_DIMS(A, Result, +=); }
 internal void 
-__BackwardT32ReduceSubBroadcast(t32 *A, t32 *Result) { __REDUCE_BROADCAST_DIMS(A, Result, -=); }
-#undef __REDUCE_BROADCAST_DIMS
+__gzBackwardReduceSubBroadcast(t32 *A, t32 *Result) { __GZ_REDUCE_BROADCAST_DIMS(A, Result, -=); }
+#undef __GZ_REDUCE_BROADCAST_DIMS
 
-#define __BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, OTHER_OPERAND_DTYPE) \
+#define __GZ_BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, OTHER_OPERAND_DTYPE) \
     Assert(Parent->Header->Dim >= ResultOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
     Assert(Parent->Header->Dim >= OtherOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
     \
@@ -169,15 +171,15 @@ __BackwardT32ReduceSubBroadcast(t32 *A, t32 *Result) { __REDUCE_BROADCAST_DIMS(A
 /* TODO(Abid): Doing a backprop on i32 doesn't make sense, this routine should be ammended so
  *             that only f32 remains. */
 internal void 
-__BackwardT32Mul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
+__gzBackwardMul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
     switch (OtherOperand->Data.DType) {
-        case dtype_f32: { __BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, f32); } break;
-        case dtype_i32: { __BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, i32); } break;
+        case dtype_f32: { __GZ_BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, f32); } break;
+        case dtype_i32: { __GZ_BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, i32); } break;
     }
 }
 #undef __BACKWARD_BINARY_MUL
 
-#define __BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, OTHER_OPERAND_DTYPE) \
+#define __GZ_BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, OTHER_OPERAND_DTYPE) \
     Assert(Parent->Header->Dim >= ResultOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
     Assert(Parent->Header->Dim >= OtherOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
     \
@@ -188,7 +190,7 @@ __BackwardT32Mul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
     for(size_t OpNum = 1; OpNum <= ParentNumData; ++OpNum) { \
         f32 ParentGrad = *((f32 *)Parent->Grad.Ptr + ParentOffset); \
         OTHER_OPERAND_DTYPE OtherOperandData = *((OTHER_OPERAND_DTYPE *)OtherOperand->Data.Ptr + OtherOperandOffset); \
-        __BACKWARD_BINARY_DIV_OPERAND_OP; \
+        __GZ_BACKWARD_BINARY_DIV_OPERAND_OP; \
         i32 DimMaxNumSoFar = 1; \
         for(i32 DimIdx = 1; DimIdx <= (i32)Parent->Header->Dim; ++DimIdx) { \
             DimMaxNumSoFar *= Parent->Header->Sizes[Parent->Header->Dim-DimIdx]; \
@@ -212,33 +214,32 @@ __BackwardT32Mul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
 /* TODO(Abid): Doing a backprop on i32 doesn't make sense, this routine should be ammended so
  *             that only f32 remains. */
 internal void
-__BackwardT32Div(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand, u32 OperandIdx) {
-
+__gzBackwardDiv(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand, u32 OperandIdx) {
     if(OperandIdx == 0) { /* First Operand */
-        #define __BACKWARD_BINARY_DIV_OPERAND_OP \
+        #define __GZ_BACKWARD_BINARY_DIV_OPERAND_OP \
             *((f32 *)ResultOperand->Grad.Ptr + ResultOffset) += (1.f / OtherOperandData) * ParentGrad
 
         switch (OtherOperand->Data.DType) {
-            case dtype_f32: { __BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, f32); } break;
-            case dtype_i32: { __BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, i32); } break;
+            case dtype_f32: { __GZ_BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, f32); } break;
+            case dtype_i32: { __GZ_BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, i32); } break;
         }
-        #undef __BACKWARD_BINARY_DIV_OPERAND_OP
+        #undef __GZ_BACKWARD_BINARY_DIV_OPERAND_OP
     } else { /* Second Operand */
-        #define __BACKWARD_BINARY_DIV_OPERAND_OP \
+        #define __GZ_BACKWARD_BINARY_DIV_OPERAND_OP \
             f32 SelfData = *((f32 *)ResultOperand->Data.Ptr + ResultOffset);\
             *((f32 *)ResultOperand->Grad.Ptr + ResultOffset) += (-OtherOperandData / (SelfData*SelfData)) * ParentGrad
 
         switch (OtherOperand->Data.DType) {
-            case dtype_f32: { __BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, f32); } break;
-            case dtype_i32: { __BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, i32); } break;
+            case dtype_f32: { __GZ_BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, f32); } break;
+            case dtype_i32: { __GZ_BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, i32); } break;
         }
-        #undef __BACKWARD_BINARY_DIV_OPERAND_OP
+        #undef __GZ_BACKWARD_BINARY_DIV_OPERAND_OP
     }
 }
 #undef __BACKWARD_BINARY_DIV
 
 internal inline void
-__ExpandVectorDim(t32 *A, u32 Pos) {
+__gzExpandVectorDim(t32 *A, u32 Pos) {
     Assert(A->Header->Dim == 1, "non-vector tensors given");
     ++A->Header->Dim;
     A->Header->Sizes[1-Pos] = A->Header->Sizes[0];
@@ -248,7 +249,7 @@ __ExpandVectorDim(t32 *A, u32 Pos) {
 }
 
 internal inline void
-__SqueezeMatrixToVectorDim(t32 *A) {
+__gzSqueezeMatrixToVectorDim(t32 *A) {
     Assert(A->Header->Dim == 2, "must be matrix (dim==2)");
     Assert((A->Header->Sizes[0] == 1) || (A->Header->Sizes[1] == 1), "at least one dimension size must be 1");
 
@@ -260,7 +261,7 @@ __SqueezeMatrixToVectorDim(t32 *A) {
 }
 
 internal void
-__BackwardT32MatMul(t32 **Operands, t32 *Parent, u32 OperandIdx) {
+__gzBackwardMatMul(t32 **Operands, t32 *Parent, u32 OperandIdx) {
     t32 *OtherOperand = Operands[1-OperandIdx];
     t32 *ResOper = Operands[OperandIdx];
 
@@ -270,16 +271,16 @@ __BackwardT32MatMul(t32 **Operands, t32 *Parent, u32 OperandIdx) {
     u32 OrigOperand1Dim = Operands[1]->Header->Dim;
     u32 OrigParentDim = Parent->Header->Dim;
     if(Operands[0]->Header->Dim == 1) {
-        __ExpandVectorDim(Operands[0], 0);
-        if(Parent->Header->Dim == 1) __ExpandVectorDim(Parent, 0);
+        __gzExpandVectorDim(Operands[0], 0);
+        if(Parent->Header->Dim == 1) __gzExpandVectorDim(Parent, 0);
     }
     if(Operands[1]->Header->Dim == 1) {
-        __ExpandVectorDim(Operands[1], 1);
-        if(Parent->Header->Dim == 1) __ExpandVectorDim(Parent, 1);
+        __gzExpandVectorDim(Operands[1], 1);
+        if(Parent->Header->Dim == 1) __gzExpandVectorDim(Parent, 1);
     }
 
     /* NOTE(Abid): Temporarily transpose the OtherOperand */
-    __T32TransposeInPlaceNoGrad(OtherOperand, OtherOperand->Header->Dim-1, OtherOperand->Header->Dim-2);
+    __gzTransposeInPlaceNoGrad(OtherOperand, OtherOperand->Header->Dim-1, OtherOperand->Header->Dim-2);
 
     /* NOTE(Abid): Defining the first and second operand, as well as their values based on OperandIdx. */
     t32 *FirstOper = NULL;
@@ -376,16 +377,16 @@ __BackwardT32MatMul(t32 **Operands, t32 *Parent, u32 OperandIdx) {
     }
 
     /* NOTE(Abid): Reverse the temporary transpose */
-    __T32TransposeInPlaceNoGrad(OtherOperand, OtherOperand->Header->Dim-1, OtherOperand->Header->Dim-2);
+    __gzTransposeInPlaceNoGrad(OtherOperand, OtherOperand->Header->Dim-1, OtherOperand->Header->Dim-2);
 
     /* NOTE(Abid): Reverse the vector dim expansions */
-    if(Operands[0]->Header->Dim != OrigOperand0Dim) __SqueezeMatrixToVectorDim(Operands[0]);
-    if(Operands[1]->Header->Dim != OrigOperand1Dim) __SqueezeMatrixToVectorDim(Operands[1]);
-    if(Parent->Header->Dim != OrigParentDim) __SqueezeMatrixToVectorDim(Parent);
+    if(Operands[0]->Header->Dim != OrigOperand0Dim) __gzSqueezeMatrixToVectorDim(Operands[0]);
+    if(Operands[1]->Header->Dim != OrigOperand1Dim) __gzSqueezeMatrixToVectorDim(Operands[1]);
+    if(Parent->Header->Dim != OrigParentDim) __gzSqueezeMatrixToVectorDim(Parent);
 }
 
 internal void
-__T32BackwardSigmoid(t32 *Operand, t32 *Parent) {
+__gzBackwardSigmoid(t32 *Operand, t32 *Parent) {
     size_t OperandNumData = Operand->Header->StorageNumElements;
     size_t ParentOffset = 0;
     size_t OperOffset = 0;
@@ -411,7 +412,7 @@ __T32BackwardSigmoid(t32 *Operand, t32 *Parent) {
 }
 
 internal void
-__T32BackwardReLU(t32 *Operand, t32 *Parent) {
+__gzBackwardReLU(t32 *Operand, t32 *Parent) {
     size_t OperandNumData = Operand->Header->StorageNumElements;
     size_t ParentOffset = 0;
     size_t OperOffset = 0;
@@ -468,13 +469,13 @@ __SqueezeEmptyDims(t32 *A) {
  *             then we have nasty infinite loop on our hands.
  *             TODO: This can be fixed if we check that result is never the same as operand(s) */
 /* TODO(Abid): Instead of having the root tensor saved here, we must create a computational graph
- *             explicitely and then pass around that variable to the T32Backprop function. This
+ *             explicitely and then pass around that variable to the gzBackprop function. This
  *             way, we can have multiple graphs at the same time for time when we need them. 
  *             The nice thing is, once you build it then you don't have to save operands when 
  *             you do operations on tensor, since we don't have to worry about that anymore. */
 internal void
-T32Backprop(t32 *RootTensor) {
-    /* NOTE(Abid): Here's how `T32Backprop` works:
+gzBackprop(t32 *RootTensor) {
+    /* NOTE(Abid): Here's how `gzBackprop` works:
      * - The function will loop through the computation tree and calculate
      *   the gradient. That means it will not be recursive (at least for now).
      *
@@ -524,18 +525,18 @@ T32Backprop(t32 *RootTensor) {
         StackState.RunningTensorNum = 0;
         StackState.NewAllocTensorNum = 5;
 
-        StackState.CurrentBlock = AllocNewStackBlock(StackState.NewAllocTensorNum, NULL);
+        StackState.CurrentBlock = gzAllocNewStackBlock(StackState.NewAllocTensorNum, NULL);
     }
 
-    __BackwardT32AddToElements(RootTensor, 1.f);
+    __gzBackwardAddToElements(RootTensor, 1.f);
 
     /* NOTE(Abid): Backpropagation logic starts here */
-    StackBlockPush(&StackState, RootTensor);
+    gzStackBlockPush(&StackState, RootTensor);
 
-    while(!IsStackBlocksEmpty(&StackState)) {
-        t32 *CurrentTensor = StackBlockTop(&StackState);
+    while(!gzIsStackBlocksEmpty(&StackState)) {
+        t32 *CurrentTensor = gzStackBlockTop(&StackState);
         tensor_op CurrentOp = CurrentTensor->Header->DerivedOp.TensorOp;
-        StackBlockPop(&StackState);
+        gzStackBlockPop(&StackState);
         if(!CurrentTensor->Header->ShouldGrad || CurrentOp == op_None) continue;
 
         Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
@@ -563,60 +564,60 @@ T32Backprop(t32 *RootTensor) {
             } break;
             case op_UnaryReduceSumAll: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
-                StackBlockPush(&StackState, Operand);
+                gzStackBlockPush(&StackState, Operand);
 
-                __BackwardT32AddToElements(Operand, *(f32 *)CurrentTensor->Grad.Ptr);
+                __gzBackwardAddToElements(Operand, *(f32 *)CurrentTensor->Grad.Ptr);
             } break;
             case op_UnarySigmoid: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
-                StackBlockPush(&StackState, Operand);
+                gzStackBlockPush(&StackState, Operand);
 
-                __T32BackwardSigmoid(Operand, CurrentTensor);
+                __gzBackwardSigmoid(Operand, CurrentTensor);
             } break;
             case op_UnaryReLU: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
-                StackBlockPush(&StackState, Operand);
+                gzStackBlockPush(&StackState, Operand);
 
-                __T32BackwardReLU(Operand, CurrentTensor);
+                __gzBackwardReLU(Operand, CurrentTensor);
             } break;
             case op_UnaryView: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
-                StackBlockPush(&StackState, Operand);
+                gzStackBlockPush(&StackState, Operand);
             } break;
             case op_BinaryAdd: {
-                StackBlockPush(&StackState, Operands[1]);
-                StackBlockPush(&StackState, Operands[0]);
+                gzStackBlockPush(&StackState, Operands[1]);
+                gzStackBlockPush(&StackState, Operands[0]);
 
-                __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[0]);
-                __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[1]);
+                __gzBackwardReduceAddBroadcast(CurrentTensor, Operands[0]);
+                __gzBackwardReduceAddBroadcast(CurrentTensor, Operands[1]);
             } break;
             case op_BinarySub: {
-                StackBlockPush(&StackState, Operands[1]);
-                StackBlockPush(&StackState, Operands[0]);
+                gzStackBlockPush(&StackState, Operands[1]);
+                gzStackBlockPush(&StackState, Operands[0]);
 
-                __BackwardT32ReduceAddBroadcast(CurrentTensor, Operands[0]);
-                __BackwardT32ReduceSubBroadcast(CurrentTensor, Operands[1]);
+                __gzBackwardReduceAddBroadcast(CurrentTensor, Operands[0]);
+                __gzBackwardReduceSubBroadcast(CurrentTensor, Operands[1]);
             } break;
             case op_BinaryMul: {
-                StackBlockPush(&StackState, Operands[1]);
-                StackBlockPush(&StackState, Operands[0]);
+                gzStackBlockPush(&StackState, Operands[1]);
+                gzStackBlockPush(&StackState, Operands[0]);
 
-                __BackwardT32Mul(Operands[1], CurrentTensor, Operands[0]);
-                __BackwardT32Mul(Operands[0], CurrentTensor, Operands[1]);
+                __gzBackwardMul(Operands[1], CurrentTensor, Operands[0]);
+                __gzBackwardMul(Operands[0], CurrentTensor, Operands[1]);
             } break;
             case op_BinaryDiv: {
-                StackBlockPush(&StackState, Operands[1]);
-                StackBlockPush(&StackState, Operands[0]);
+                gzStackBlockPush(&StackState, Operands[1]);
+                gzStackBlockPush(&StackState, Operands[0]);
 
-                __BackwardT32Div(Operands[1], CurrentTensor, Operands[0], 0);
-                __BackwardT32Div(Operands[0], CurrentTensor, Operands[1], 1);
+                __gzBackwardDiv(Operands[1], CurrentTensor, Operands[0], 0);
+                __gzBackwardDiv(Operands[0], CurrentTensor, Operands[1], 1);
             } break;
             case op_BinaryMatmul: {
-                StackBlockPush(&StackState, Operands[1]);
-                StackBlockPush(&StackState, Operands[0]);
+                gzStackBlockPush(&StackState, Operands[1]);
+                gzStackBlockPush(&StackState, Operands[0]);
 
-                __BackwardT32MatMul(Operands, CurrentTensor, 0);
-                __BackwardT32MatMul(Operands, CurrentTensor, 1);
+                __gzBackwardMatMul(Operands, CurrentTensor, 0);
+                __gzBackwardMatMul(Operands, CurrentTensor, 1);
             } break;
             default: Assert(0, "invalid code path");
         }
@@ -629,7 +630,7 @@ T32Backprop(t32 *RootTensor) {
     Assert(StackState.ReservedBlock, "reserved block should've been here! Gary, who took the block, man?");
     if(StackState.GlobalMaxTensorNum > StackState.ReservedBlock->MaxNumTen) {
         Free(StackState.ReservedBlock); 
-        StackState.ReservedBlock = AllocNewStackBlock(StackState.GlobalMaxTensorNum, NULL);
+        StackState.ReservedBlock = gzAllocNewStackBlock(StackState.GlobalMaxTensorNum, NULL);
     }
 
     PrevRootTensor = RootTensor;

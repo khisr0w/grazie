@@ -15,7 +15,7 @@
 #define _Realloc(ptr, size) realloc(ptr, size)
 
 inline internal void *
-PlatoformAllocate(usize Size) {
+gzPlatoformMemAllocate(usize Size) {
     void *Result = NULL;
 
 #ifdef GRAZIE_PLT_WIN
@@ -38,17 +38,17 @@ PlatoformAllocate(usize Size) {
 }
 
 internal mem_arena
-AllocateArena(usize BytesToAllocate) {
+gzMemArenaAllocate(usize BytesToAllocate) {
     mem_arena Arena = {0};
-    Arena.MaxSize = BytesToAllocate;
-    Arena.Ptr = PlatoformAllocate(Arena.MaxSize);
+    Arena.Size = BytesToAllocate;
+    Arena.Ptr = gzPlatoformMemAllocate(Arena.Size);
     Arena.Used = 0;
 
     return Arena;
 }
 
 inline internal temp_memory
-BeginTempMemory(mem_arena *Arena) {
+gzMemTempBegin(mem_arena *Arena) {
     temp_memory Result = {0};
 
     Result.Arena = Arena;
@@ -60,16 +60,16 @@ BeginTempMemory(mem_arena *Arena) {
 }
 
 inline internal void
-EndTempMemory(temp_memory TempMem) {
+gzMemTempEnd(temp_memory TempMem) {
     mem_arena *Arena = TempMem.Arena;
     Assert(Arena->Used >= TempMem.Used, "something was freed when it shouldn't have been");
-    Arena->Used = TempMem.Used;
     Assert(Arena->TempCount > 0, "no temp memory registered for it to end");
+    Arena->Used = TempMem.Used;
     --Arena->TempCount;
 }
 
 internal inline usize
-AligmentOffset(mem_arena *Arena, usize Alignment) {
+gzMemAligmentOffset(mem_arena *Arena, usize Alignment) {
 	usize AlignmentOffset = 0;
 	usize ResultPointer = (usize)Arena->Ptr + Arena->Used;
 
@@ -81,11 +81,11 @@ AligmentOffset(mem_arena *Arena, usize Alignment) {
 	return AlignmentOffset;
 }
 
-#define PushStruct(Arena, Type) (Type *)PushSize(Arena, sizeof(Type))
-#define PushArray(Arena, Type, Count) (Type *)PushSize(Arena, (Count)*sizeof(Type))
+#define gzMemPushStruct(Arena, Type) (Type *)gzMemPushSize(Arena, sizeof(Type))
+#define gzMemPushArray(Arena, Type, Count) (Type *)gzMemPushSize(Arena, (Count)*sizeof(Type))
 internal void *
-PushSize(mem_arena *Arena, usize Size) {
-    Assert(Arena->Used + Size < Arena->MaxSize, "not enough arena memory");
+gzMemPushSize(mem_arena *Arena, usize Size) {
+    Assert(Arena->Used + Size < Arena->Size, "not enough arena memory");
     void *Result = (u8 *)Arena->Ptr + Arena->Used;
     Arena->Used += Size;
 

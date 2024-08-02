@@ -1,25 +1,22 @@
 /*  +======| File Info |===============================================================+
     |                                                                                  |
     |     Subdirectory:  /src                                                          |
-    |    Creation date:  Mo 20 Mär 2023 20:58:37 CET                                   |
+    |    Creation date:  8/1/2024 7:53:55 PM                                           |
     |    Last Modified:                                                                |
     |                                                                                  |
-    +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
+    +======================================| Copyright © Sayed Abid Hashimi |==========+  */
 
-#if !defined(MEMORY_H)
+#if !defined(MODULE_H)
 
-typedef struct {
-    usize Used;
-    usize Size;
-    void *Ptr;
-    
-    u32 TempCount;
-} mem_arena;
+typedef enum {
+    module_None,
+    module_Linear,
+} module_type;
 
 typedef struct {
-    mem_arena *Arena;
-    usize Used;
-} temp_memory;
+    tensor_list TensorList;
+    module_type Type;
+} module;
 
-#define MEMORY_H
+#define MODULE_H
 #endif

@@ -22,8 +22,8 @@ T32LossBinaryCrossEntropy(t32 *A, t32 *B, t32 *Result, loss_reduce_method Reduce
     /* TODO(Abid): Perhaps it would be best to check if A and B are probabilites? Not now though. */
     Assert((A->Data.DType == B->Data.DType) && (B->Data.DType == Result->Data.DType) &&
            (A->Data.DType == dtype_f32), "unexpected dtype, f32 expected");
-    Assert(IsShapeEqual(A->Header, B->Header), "operand(s) shape mismatch");
-    Assert((ReduceMethod == loss_red_None) ? IsShapeEqual(Result->Header, B->Header) :
+    Assert(gzIsShapeEqual(A->Header, B->Header), "operand(s) shape mismatch");
+    Assert((ReduceMethod == loss_red_None) ? gzIsShapeEqual(Result->Header, B->Header) :
                                              (Result->Header->Dim == 1) && (Result->Header->Sizes[0] == 1), "operand-result shape mismatch");
     u32 IsNotNone = (ReduceMethod != loss_red_None);
     size_t AOffset = 0;

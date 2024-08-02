@@ -1,25 +1,23 @@
 /*  +======| File Info |===============================================================+
     |                                                                                  |
     |     Subdirectory:  /src                                                          |
-    |    Creation date:  Mo 20 Mär 2023 20:58:37 CET                                   |
+    |    Creation date:  8/1/2024 11:16:31 PM                                          |
     |    Last Modified:                                                                |
     |                                                                                  |
-    +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
+    +======================================| Copyright © Sayed Abid Hashimi |==========+  */
 
-#if !defined(MEMORY_H)
-
-typedef struct {
-    usize Used;
-    usize Size;
-    void *Ptr;
-    
-    u32 TempCount;
-} mem_arena;
+#if !defined(RAND_H)
 
 typedef struct {
-    mem_arena *Arena;
-    usize Used;
-} temp_memory;
+    u64 V;
 
-#define MEMORY_H
+    i32 NumU8Reserves;
+    i32 NumU16Reserves;
+    u64 U8Reserves;
+    u64 U16Reserves;
+    f64 F64Reserve;
+    bool IsInit;
+} rand_state;
+
+#define RAND_H
 #endif

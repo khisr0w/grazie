@@ -83,5 +83,11 @@ struct t32 {
     storage Grad;
 };
 
+typedef struct {
+    t32 **Array;
+    usize Size;
+    usize Used;
+} tensor_list;
+
 #define TENSOR_H
 #endif
