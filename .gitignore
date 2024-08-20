@@ -2,3 +2,4 @@
 *.sln
 binary/
 *.swp
+tags

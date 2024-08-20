@@ -495,7 +495,8 @@ gzBackprop(t32 *RootTensor) {
      *   are in some nth run of a backward computation; however, if the address is
      *   different then the whole set of local_persist variables are set to their
      *   defaults, as we expect to be in the 1st run of a new chain of backward
-     *   computations. */
+     *   computations.
+     */
 
     local_persist t32 *PrevRootTensor = {0};
     local_persist stack_blocks_state StackState = {0};
