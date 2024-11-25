@@ -260,6 +260,9 @@ __gzSqueezeMatrixToVectorDim(t32 *A) {
     A->Header->Dim = 1;
 }
 
+
+/* TODO(abid): This routine is a travesty of unconscionable magnitude. Must purge before someone sees it.
+ * 0_0 - 27.Sep.2024 */
 internal void
 __gzBackwardMatMul(t32 **Operands, t32 *Parent, u32 OperandIdx) {
     t32 *OtherOperand = Operands[1-OperandIdx];

@@ -106,7 +106,7 @@ gzRandNormal(f64 Mean, f64 Std) {
         X = U - 0.449871;
         Y = fabs(V) + 0.386595;
         Q = (X*X) + Y*(0.19600*Y-0.25472*X);
-    } while(Q > 0.27597 && (Q > 0.27846 || (V*V) > -4.*log(U)*(U*U)));
+    } while(Q > 0.27597 && (Q > 0.27846 || (V*V) > -4.*gz_log(U)*(U*U)));
 
     return Mean + Std * (V/U);
 }

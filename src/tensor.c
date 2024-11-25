@@ -770,18 +770,12 @@ __gzSigmoidOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHe
 }
 
 internal inline void
-gzSigmoid_(t32 *A, t32 *Result) {
+gz_sigmoid_(t32 *A, t32 *Result) {
     Assert((A->Data.DType == Result->Data.DType) & (A->Data.DType == dtype_f32),
            "sigmoid require tensor(s) to be of type f32");
     __gzSigmoidOnStorage(A->Header, A->Data.Ptr, Result->Header, Result->Data.Ptr);
     Result->Header->DerivedOp.TensorOp = op_UnarySigmoid;
     Result->Header->DerivedOp.Operands[0] = A;
-}
-
-internal inline f32
-Clamp(f32 Value, f32 Min, f32 Max) {
-    f32 ClampBelow = Value < Min ? Min : Value;
-    return ClampBelow > Max ? Max : ClampBelow;
 }
 
 internal void
@@ -836,7 +830,7 @@ __LossLogOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHead
     size_t ResultOffset = 0;
     size_t AOffset = 0;
     for(size_t OpNum = 1; OpNum <= ANumData; ++OpNum) {
-        ResStorage[ResultOffset] = logf(SrcStorage[AOffset]);
+        ResStorage[ResultOffset] = gz_logf(SrcStorage[AOffset]);
 
         i32 DimMaxNumSoFar = 1;
         for(i32 DimIdx = 1; DimIdx <= (i32)AHead->Dim; ++DimIdx) {

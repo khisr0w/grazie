@@ -52,7 +52,11 @@ debug: $(DEBUG_DIR) $(OBJECTS_DEBUG) $(EXECUTABLE_DEUBG)
 
 $(DEBUG_DIR):
 	@echo Starting debug build...
+ifeq ($(OS),Windows_NT)
+	@if not exist $(DEBUG_DIR) mkdir $(DEBUG_DIR)
+else
 	@mkdir -p $(DEBUG_DIR)
+endif
 
 $(DEBUG_DIR)/main.obj: $(SRC_DIR)/main.c
 	@echo "    [Debug] Compiling Objects..."
@@ -78,8 +82,12 @@ release: $(RELEASE_DIR) $(OBJECTS_RELEASE) $(EXECUTABLE_RELEASE)
 	@echo Release build complete...
 
 $(RELEASE_DIR):
+ifeq ($(OS),Windows_NT)
 	@echo Starting release build...
+	@if not exist $(RELEASE_DIR) mkdir $(RELEASE_DIR)
+else
 	@mkdir -p $(RELEASE_DIR)
+endif
 
 $(RELEASE_DIR)/main.obj: $(SRC_DIR)/main.c
 	@echo "    Compiling Objects..."

@@ -13,7 +13,7 @@ typedef enum {
 } loss_reduce_method;
 
 internal void
-T32LossBinaryCrossEntropy(t32 *A, t32 *B, t32 *Result, loss_reduce_method ReduceMethod) {
+gz_loss_binary_cross_entropy(t32 *A, t32 *B, t32 *Result, loss_reduce_method ReduceMethod) {
     /* NOTE(Abid): We expect the input to be probabilities. The tensors are as follows:
      *             A : Prediction
      *             B : Ground
@@ -39,7 +39,7 @@ T32LossBinaryCrossEntropy(t32 *A, t32 *B, t32 *Result, loss_reduce_method Reduce
         f32 Y = ((f32 *)B->Data.Ptr)[BOffset];
 
         /* TODO(Abid): Maybe do the weight as well? Maybe not. */
-        f32 Loss = Y*Clamp(logf(X), -100, INFINITY) + (1-Y)*Clamp(logf(1-X), -100, INFINITY);
+        f32 Loss = Y*gz_clamp(gz_logf(X), -100, INFINITY) + (1-Y)*gz_clamp(gz_logf(1-X), -100, INFINITY);
 
         /* NOTE(Abid): If we do not have loss_red_None, then we will discard any value inside result,
          *             otherwise we add to it. */

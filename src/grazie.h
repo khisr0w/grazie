@@ -28,6 +28,7 @@
 
 /* NOTE(Abid): Unity includes */
 #include "utils.h"
+#include "gmath.c"
 #include "rand.c"
 #include "memory.c"
 #include "tensor.c"

@@ -60,8 +60,38 @@ i32 main() {
 
         gzMemTempEnd(TempSession);
     }
-    gzPrint(Lin1->TensorList.Array[0]);
-    gzPrint(Lin1->TensorList.Array[1]);
+    // gzPrint(Lin1->TensorList.Array[0]);
+    // gzPrint(Lin1->TensorList.Array[1]);
+
+    f32 a_data[] = {
+        1, 2, 3,
+        4, 5, 6,
+    };
+    u32 a_shape[] = {2, 3};
+    t32 *a = gzTensorFromArray(a_shape, a_data, f32, true, &MainArena);
+
+    f32 b_data[] = {
+        7, 8, 9, 10,
+        11, 12, 13, 14,
+        14, 15, 16, 17,
+    };
+    u32 b_shape[] = {3, 4};
+    t32 *b = gzTensorFromArray(b_shape, b_data, f32, true, &MainArena);
+
+    u32 c_shape[] = {2, 4};
+    t32 *c = gzTensorEmpty(c_shape, f32, true, &MainArena);
+
+    gzMatMul(a, b, c);
+    gzBackprop(c);
+
+    gzPrint(c);
+    gzSwapDataGrad(a);
+    gzSwapDataGrad(b);
+    gzPrint(a);
+    gzPrint(b);
+    gzSwapDataGrad(a);
+    gzSwapDataGrad(b);
+
 
     return(0);
 }
