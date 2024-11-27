@@ -16,7 +16,7 @@ gzIsStackBlocksEmpty(stack_blocks_state *State) { return State->RunningTensorNum
 internal inline stack_block *
 gzAllocNewStackBlock(size_t MaxNumTensors, stack_block *BelowBlock) {
     stack_block *Result = (stack_block *)Malloc(MaxNumTensors*sizeof(t32 *) + sizeof(stack_block));
-    Assert(Result, "failed to allocate stack block");
+    assert(Result, "failed to allocate stack block");
     Result->TensorPtr = (t32 **)(Result+1);
     Result->MaxNumTen = MaxNumTensors;
     Result->BelowBlock = BelowBlock;
@@ -51,7 +51,7 @@ gzStackBlockPush(stack_blocks_state *State, t32 *Tensor) {
 
 internal inline void
 gzStackBlockPop(stack_blocks_state *State) {
-    Assert(State->RunningTensorNum > 0, "cannot pop empty stack");
+    assert(State->RunningTensorNum > 0, "cannot pop empty stack");
     --State->CurrentBlockTopIdx;
     --State->RunningTensorNum;
 
@@ -70,7 +70,7 @@ gzStackBlockPop(stack_blocks_state *State) {
 
 internal inline t32 *
 gzStackBlockTop(stack_blocks_state *State) {
-    Assert(State->RunningTensorNum > 0, "cannot get top of an empty stack");
+    assert(State->RunningTensorNum > 0, "cannot get top of an empty stack");
     return State->CurrentBlock->TensorPtr[State->CurrentBlockTopIdx];
 }
 
@@ -108,7 +108,7 @@ __gzBackwardSetElements(t32 *A, f32 Value)
  *             it to Result tensor. There is a faster way to do it, but that most likely requires a
  *             malloc which I shall never do. */
 #define __GZ_REDUCE_BROADCAST_DIMS(A, Result, OP) \
-    Assert(A->Header->Dim >= Result->Header->Dim, "result tensor cannot be higher than operand"); \
+    assert(A->Header->Dim >= Result->Header->Dim, "result tensor cannot be higher than operand"); \
     size_t ANumData = A->Header->StorageNumElements; \
     \
     size_t ResultOffset = 0; \
@@ -137,8 +137,8 @@ __gzBackwardReduceSubBroadcast(t32 *A, t32 *Result) { __GZ_REDUCE_BROADCAST_DIMS
 #undef __GZ_REDUCE_BROADCAST_DIMS
 
 #define __GZ_BACKWARD_BINARY_MUL(OtherOperand, Parent, ResultOperand, OTHER_OPERAND_DTYPE) \
-    Assert(Parent->Header->Dim >= ResultOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
-    Assert(Parent->Header->Dim >= OtherOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
+    assert(Parent->Header->Dim >= ResultOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
+    assert(Parent->Header->Dim >= OtherOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
     \
     size_t ResultOffset = 0; \
     size_t ParentOffset = 0; \
@@ -180,8 +180,8 @@ __gzBackwardMul(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand) {
 #undef __BACKWARD_BINARY_MUL
 
 #define __GZ_BACKWARD_BINARY_DIV(OtherOperand, Parent, ResultOperand, OTHER_OPERAND_DTYPE) \
-    Assert(Parent->Header->Dim >= ResultOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
-    Assert(Parent->Header->Dim >= OtherOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
+    assert(Parent->Header->Dim >= ResultOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
+    assert(Parent->Header->Dim >= OtherOperand->Header->Dim, "operand tensor dim cannot be higher than parent"); \
     \
     size_t ResultOffset = 0; \
     size_t ParentOffset = 0; \
@@ -240,7 +240,7 @@ __gzBackwardDiv(t32 *OtherOperand, t32 *Parent, t32 *ResultOperand, u32 OperandI
 
 internal inline void
 __gzExpandVectorDim(t32 *A, u32 Pos) {
-    Assert(A->Header->Dim == 1, "non-vector tensors given");
+    assert(A->Header->Dim == 1, "non-vector tensors given");
     ++A->Header->Dim;
     A->Header->Sizes[1-Pos] = A->Header->Sizes[0];
     A->Header->Strides[1-Pos] = A->Header->Strides[0];
@@ -250,8 +250,8 @@ __gzExpandVectorDim(t32 *A, u32 Pos) {
 
 internal inline void
 __gzSqueezeMatrixToVectorDim(t32 *A) {
-    Assert(A->Header->Dim == 2, "must be matrix (dim==2)");
-    Assert((A->Header->Sizes[0] == 1) || (A->Header->Sizes[1] == 1), "at least one dimension size must be 1");
+    assert(A->Header->Dim == 2, "must be matrix (dim==2)");
+    assert((A->Header->Sizes[0] == 1) || (A->Header->Sizes[1] == 1), "at least one dimension size must be 1");
 
     if(A->Header->Sizes[0] == 1) {
         A->Header->Sizes[0] = A->Header->Sizes[1];
@@ -477,7 +477,7 @@ __SqueezeEmptyDims(t32 *A) {
  *             The nice thing is, once you build it then you don't have to save operands when 
  *             you do operations on tensor, since we don't have to worry about that anymore. */
 internal void
-gzBackprop(t32 *RootTensor) {
+gz_backprop(t32 *RootTensor) {
     /* NOTE(Abid): Here's how `gzBackprop` works:
      * - The function will loop through the computation tree and calculate
      *   the gradient. That means it will not be recursive (at least for now).
@@ -504,7 +504,7 @@ gzBackprop(t32 *RootTensor) {
     local_persist t32 *PrevRootTensor = {0};
     local_persist stack_blocks_state StackState = {0};
 
-    Assert(RootTensor->Header && RootTensor->Grad.Ptr, "root tensor grad is not tracked");
+    assert(RootTensor->Header && RootTensor->Grad.Ptr, "root tensor grad is not tracked");
 
     /* NOTE(Abid): If the below condition doesn't hit, then we are in the nth step of the same computation chain. */
     if((PrevRootTensor != RootTensor) || (PrevRootTensor->Grad.Ptr != RootTensor->Grad.Ptr)) {
@@ -543,18 +543,18 @@ gzBackprop(t32 *RootTensor) {
         gzStackBlockPop(&StackState);
         if(!CurrentTensor->Header->ShouldGrad || CurrentOp == op_None) continue;
 
-        Assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
-        Assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
+        assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
+        assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
         t32 *Operands[2];
         Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
         Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
 
-        Assert(Operands[0]->Grad.Ptr, "grad storage not found");
-        Assert((CurrentOp > op_UnaryEnd  && Operands[1]->Grad.Ptr) ||
+        assert(Operands[0]->Grad.Ptr, "grad storage not found");
+        assert((CurrentOp > op_UnaryEnd  && Operands[1]->Grad.Ptr) ||
                CurrentOp < op_UnaryEnd, "grad storage not found");
-        Assert(CurrentTensor->Data.DType == dtype_f32, "cannot backpropagate through a non-float tensor")
-        Assert(Operands[0]->Data.DType == dtype_f32, "cannot backpropagate through a non-float tensor")
-        Assert((CurrentOp > op_UnaryEnd  && Operands[1]->Data.DType == dtype_f32) ||
+        assert(CurrentTensor->Data.DType == dtype_f32, "cannot backpropagate through a non-float tensor")
+        assert(Operands[0]->Data.DType == dtype_f32, "cannot backpropagate through a non-float tensor")
+        assert((CurrentOp > op_UnaryEnd  && Operands[1]->Data.DType == dtype_f32) ||
                CurrentOp < op_UnaryEnd, "cannot backpropagate through a non-float tensor")
 
         switch (CurrentOp) {
@@ -623,15 +623,15 @@ gzBackprop(t32 *RootTensor) {
                 __gzBackwardMatMul(Operands, CurrentTensor, 0);
                 __gzBackwardMatMul(Operands, CurrentTensor, 1);
             } break;
-            default: Assert(0, "invalid code path");
+            default: assert(0, "invalid code path");
         }
     }
 
-    Assert(!StackState.CurrentBlock, "oops, we should not have current block at the end");
+    assert(!StackState.CurrentBlock, "oops, we should not have current block at the end");
 
     /* NOTE(Abid): Check if our maximum required stack size exceeded the reserved blocks's size, which means we haven't
      *             caliberated the optimal size. Should only happen if new chain is introduced or on the first run. */
-    Assert(StackState.ReservedBlock, "reserved block should've been here! Gary, who took the block, man?");
+    assert(StackState.ReservedBlock, "reserved block should've been here! Gary, who took the block, man?");
     if(StackState.GlobalMaxTensorNum > StackState.ReservedBlock->MaxNumTen) {
         Free(StackState.ReservedBlock); 
         StackState.ReservedBlock = gzAllocNewStackBlock(StackState.GlobalMaxTensorNum, NULL);

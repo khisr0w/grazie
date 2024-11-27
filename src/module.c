@@ -9,9 +9,9 @@
 #include "module.h"
 
 internal module *
-gzLinear(u32 InDim, u32 OutDim, mem_arena *Arena) {
+gz_linear(u32 InDim, u32 OutDim, mem_arena *Arena) {
     module *Module = gzMemPushStruct(Arena, module);
-    Module->Type = module_Linear;
+    Module->type = module_Linear;
 
     u32 WShape[] = {1, OutDim, InDim};
     u32 BShape[] = {1, OutDim};
@@ -33,40 +33,40 @@ gzLinear(u32 InDim, u32 OutDim, mem_arena *Arena) {
     t32 *W = gzTensorNormal(WShape, 0.f, 1.f, true, Arena);
     t32 *B = gzTensorNormal(BShape, 0.f, 1.f, true, Arena);
 
-    Module->TensorList = gzTensorListAllocate(2, Arena);
-    gzTensorListAdd(&Module->TensorList, W);
-    gzTensorListAdd(&Module->TensorList, B);
+    Module->weights = gz_tensor_list_allocate(2, Arena);
+    gz_tensor_list_add(W, &Module->weights);
+    gz_tensor_list_add(B, &Module->weights);
 
     return Module;
 }
 
 internal t32 *
-gzRunModule(module *Module, t32 *Input, mem_arena *Arena) {
+gz_module_run(module *Module, t32 *Input, mem_arena *Arena) {
     t32 *Result = NULL;
 
-    switch(Module->Type) {
+    switch(Module->type) {
         case module_Linear: {
             /* TODO(Abid): Implement backward for addmm to make it more efficient. */
-            t32 *W = Module->TensorList.Array[0];
-            t32 *B = Module->TensorList.Array[1];
-            Assert(Input->Header->Dim == 2, "expected input dim to be 2");
-            Assert(Input->Header->Sizes[1] == W->Header->Sizes[2], "input-linear shape mismatch");
+            t32 *W = Module->weights.array[0];
+            t32 *B = Module->weights.array[1];
+            assert(Input->Header->Dim == 2, "expected input dim to be 2");
+            assert(Input->Header->Sizes[1] == W->Header->Sizes[2], "input-linear shape mismatch");
 
             u32 BatchSize = Input->Header->Sizes[0];
             u32 InDim = Input->Header->Sizes[1];
             u32 OutDim = W->Header->Sizes[1];
 
             u32 WXShape[] = {BatchSize, OutDim, 1};
-            t32 *WX = gzTensorEmpty(WXShape, f32, true, Arena);
+            t32 *WX = gz_tensor_empty(WXShape, f32, true, Arena);
             u32 InputViewShape[] = {BatchSize, InDim, 1};
-            t32 *InputView = _gzNewView(Input, InputViewShape, gzArrayLength(InputViewShape), Arena);
+            t32 *InputView = _gzNewView(Input, InputViewShape, gz_array_length(InputViewShape), Arena);
             gzMatMul(W, InputView, WX);
 
             u32 ResultShape[] = {BatchSize, OutDim};
-            Result = gzTensorEmpty(ResultShape, f32, true, Arena);
+            Result = gz_tensor_empty(ResultShape, f32, true, Arena);
             gzAdd(gzTrimUnitSize(WX, Arena), B, Result);
         } break;
-        default: Assert(0, "invalid code path"); break;
+        default: assert(0, "invalid code path"); break;
     }
 
     return Result;

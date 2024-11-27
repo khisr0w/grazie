@@ -36,6 +36,7 @@
 #include "loss.c"
 #include "optimizer.c"
 #include "module.c"
+#include "dataset.c"
 
 #define GRAZIE_H
 #endif

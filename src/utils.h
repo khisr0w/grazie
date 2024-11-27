@@ -14,7 +14,7 @@
 #endif
 
 #ifdef GRAZIE_ASSERT
-#define Assert(Expr, ErrorStr, ...) \
+#define assert(Expr, ErrorStr, ...) \
     if((Expr)) { } \
     else { \
         fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\n", \
@@ -22,7 +22,7 @@
         *(i32 *)0 = 0; \
     }
 #else
-#define Assert(Expr, ErrorStr, ...) \
+#define assert(Expr, ErrorStr, ...) \
     if((Expr)) { } \
     else { \
         fprintf(stderr, "ASSERTION ERROR (%s:%d): " ErrorStr "\nExiting...\n", \
@@ -33,7 +33,7 @@
 
 
 
-#define gzArrayLength(Array) (sizeof(Array)/sizeof(Array[0]))
+#define gz_array_length(Array) (sizeof(Array)/sizeof(Array[0]))
 
 /* NOTE(Abid): Byte Macros */
 #define gzKilobyte(Value) ((Value)*1024LL)
@@ -101,20 +101,20 @@ gzStatAccumulate(f64 Value, f64_stat *Stat) {
 
 inline internal f64
 gzStatMean(f64_stat *Stat) {
-    Assert(Stat->Count > 0, "cannot calculate mean for count < 1");
+    assert(Stat->Count > 0, "cannot calculate mean for count < 1");
     return Stat->Sum / Stat->Count;
 }
 
 inline internal f64
 gzStatVar(f64_stat *Stat) {
-    Assert(Stat->Count > 0, "Cannot calculate variance for count < 1.");
+    assert(Stat->Count > 0, "Cannot calculate variance for count < 1.");
     f64 StatMean = gzStatMean(Stat);
-    return (Stat->SumSquared - 2 * StatMean * (Stat->Sum) + Stat->Count*(StatMean*StatMean)) / max(Stat->Count - 1, 1);
+    return (Stat->SumSquared - 2 * StatMean * (Stat->Sum) + Stat->Count*(StatMean*StatMean)) / fmax(Stat->Count - 1, 1);
 }
 
 inline internal f64
 gzStatStd(f64_stat *Stat) {
-    Assert(Stat->Count > 0, "Cannot calculate std for count < 1.");
+    assert(Stat->Count > 0, "Cannot calculate std for count < 1.");
     return sqrt(gzStatVar(Stat));
 }
 

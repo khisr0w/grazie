@@ -48,7 +48,7 @@ gzMemArenaAllocate(usize BytesToAllocate) {
 }
 
 inline internal temp_memory
-gzMemTempBegin(mem_arena *Arena) {
+gz_mem_temp_begin(mem_arena *Arena) {
     temp_memory Result = {0};
 
     Result.Arena = Arena;
@@ -60,10 +60,10 @@ gzMemTempBegin(mem_arena *Arena) {
 }
 
 inline internal void
-gzMemTempEnd(temp_memory TempMem) {
+gz_mem_temp_end(temp_memory TempMem) {
     mem_arena *Arena = TempMem.Arena;
-    Assert(Arena->Used >= TempMem.Used, "something was freed when it shouldn't have been");
-    Assert(Arena->TempCount > 0, "no temp memory registered for it to end");
+    assert(Arena->Used >= TempMem.Used, "something was freed when it shouldn't have been");
+    assert(Arena->TempCount > 0, "no temp memory registered for it to end");
     Arena->Used = TempMem.Used;
     --Arena->TempCount;
 }
@@ -85,7 +85,7 @@ gzMemAligmentOffset(mem_arena *Arena, usize Alignment) {
 #define gzMemPushArray(Arena, Type, Count) (Type *)gzMemPushSize(Arena, (Count)*sizeof(Type))
 internal void *
 gzMemPushSize(mem_arena *Arena, usize Size) {
-    Assert(Arena->Used + Size < Arena->Size, "not enough arena memory");
+    assert(Arena->Used + Size < Arena->Size, "not enough arena memory");
     void *Result = (u8 *)Arena->Ptr + Arena->Used;
     Arena->Used += Size;
 

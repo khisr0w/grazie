@@ -8,28 +8,83 @@
 
 #include "grazie.h"
 
+inline internal void
+train_xor(dataset *Xs, dataset *ys, f32 learning_rate, mem_arena *arena) {
+    module *model[] = {
+        gz_linear(2, 10, arena),
+        gz_linear(10, 8, arena),
+        gz_linear(8,  1, arena)
+    };
+    tensor_list optim_list = gz_tensor_list_from_module_list(model, gz_array_length(model), arena);
+
+    u32 num_epochs = 100;
+    for(u32 epoch = 0; epoch < num_epochs; ++epoch) {
+
+        for(u64 data_point = 0; data_point < Xs->length; ++data_point) {
+            temp_memory train_session = gz_mem_temp_begin(arena);
+
+            gz_grad_zero(optim_list);
+            t32 *input = dataset_index(Xs, data_point);
+            t32 *label = dataset_index(ys, data_point);
+
+            t32 *x = gz_module_run(model[0], input, arena);
+            x = gz_relu(x, arena);
+            x = gz_module_run(model[1], x, arena);
+            x = gz_relu(x, arena);
+            x = gz_module_run(model[2], x, arena);
+            x = gz_sigmoid(x, arena);
+
+            t32 *loss = gz_loss_binary_cross_entropy(x, label, reduce_mean, arena);
+            printf("Loss: %f\n", *(f32 *)loss->Data.Ptr);
+            gz_backprop(loss);
+
+            gz_optim_sgd(optim_list, learning_rate);
+            gz_mem_temp_end(train_session);
+        }
+    }
+}
+
 i32 main() {
     /* NOTE(Abid): To implement XOR NN, we need:
      *             0. Non-Linearities(ReLU)      (DONE)
      */
 
-    mem_arena MainArena = gzMemArenaAllocate(gzMegabyte(100));
+    mem_arena main_arena = gzMemArenaAllocate(gzMegabyte(100));
 
     /* NOTE(Abid): Input */
-    // f32 TrainX[][2] = {
-    //     {0, 0},
-    //     {0, 1},
-    //     {1, 0},
-    //     {1, 1},
-    // };
+    f32 train_X[] = {
+        0.0, 0.0,
+        0.0, 1.0,
+        1.0, 0.0,
+        1.0, 1.0,
+    };
+    f32 train_y[] = {
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+    };
 
-    // f32 TrainY[][1] = {
-    //     {0},
-    //     {1},
-    //     {1},
-    //     {0},
-    // };
+    f32 learning_rate = 0.003;
+    u64 batch_size = 1;
+    u64 X_shape[] = {2};
+    u64 y_shape[] = {1};
+    dataset X = dataset_build(train_X, gz_array_length(train_X), batch_size, X_shape,
+                              gz_array_length(X_shape), &main_arena);
+    dataset y = dataset_build(train_y, gz_array_length(train_y), batch_size, y_shape,
+                              gz_array_length(y_shape), &main_arena);
 
+    train_xor(&X, &y, learning_rate, &main_arena);
+
+    // for(u64 idx = 0; idx < X.length; ++idx) {
+    //     t32 *input = dataset_index(&X, idx);
+    //     gz_print(input);
+    // }
+
+    return(0);
+}
+
+#if 0
     u32 InputShape[] = {5, 7};
     f32 InputData[] = {
         0.3978f, -1.1573f,  0.5564f,  1.4209f,  0.6619f,  1.2710f,  1.0088f,
@@ -92,6 +147,4 @@ i32 main() {
     gzSwapDataGrad(a);
     gzSwapDataGrad(b);
 
-
-    return(0);
-}
+#endif

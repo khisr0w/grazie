@@ -37,9 +37,9 @@ T32ToggleOptimWatch(bool Start) {
 #endif
 
 internal inline void
-gzGradZero(tensor_list TensorList) {
-    for(u32 TensorIdx = 0; TensorIdx < TensorList.Used; ++TensorIdx) {
-        t32 *Tensor = TensorList.Array[TensorIdx];
+gz_grad_zero(tensor_list TensorList) {
+    for(u32 TensorIdx = 0; TensorIdx < TensorList.used; ++TensorIdx) {
+        t32 *Tensor = TensorList.array[TensorIdx];
         for(usize DataIdx = 0; DataIdx < Tensor->Header->StorageNumElements; ++DataIdx) {
             ((f32 *)Tensor->Grad.Ptr)[DataIdx] = 0.f;
         }
@@ -47,11 +47,11 @@ gzGradZero(tensor_list TensorList) {
 }
 
 internal void
-gzOptimSGD(tensor_list TensorList, f32 LearningRate) {
+gz_optim_sgd(tensor_list TensorList, f32 LearningRate) {
     /* TODO(Abid): Add nesterov momentum as well as weight decay. */
 
-    for(u32 TensorIdx = 0; TensorIdx < TensorList.Used; ++TensorIdx) {
-        t32 *Tensor = TensorList.Array[TensorIdx];
+    for(u32 TensorIdx = 0; TensorIdx < TensorList.used; ++TensorIdx) {
+        t32 *Tensor = TensorList.array[TensorIdx];
         size_t NumData = Tensor->Header->StorageNumElements;
         size_t Offset = 0;
         for(size_t OpNum = 1; OpNum <= NumData; ++OpNum) {

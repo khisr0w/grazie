@@ -9,7 +9,7 @@ RELEASE_DIR := $(BIN_DIR)/release
 
 # Compiler and flags
 CC := clang
-CFLAGS_COMMON := -fno-caret-diagnostics -Wno-null-dereference -DGRAZIE_PLT_LINUX #/EHa /nologo /FC =
+CFLAGS_COMMON := -fdiagnostics-absolute-paths -fno-caret-diagnostics -Wno-null-dereference -DGRAZIE_PLT_LINUX -lm #/EHa /nologo /FC =
 CFLAGS_DEBUG := -g3 #/Od /MTd /Z7 /Zo /DDEBUG
 CFLAGS_RELEASE := #/O2 /Oi /MT /DRELEASE
 

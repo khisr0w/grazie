@@ -14,8 +14,8 @@ typedef enum {
 } module_type;
 
 typedef struct {
-    tensor_list TensorList;
-    module_type Type;
+    tensor_list weights;
+    module_type type;
 } module;
 
 #define MODULE_H

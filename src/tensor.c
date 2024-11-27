@@ -15,6 +15,53 @@
 
 #include "tensor.h"
 #include "module.h"
+#define __ALLOC_TENSOR_HUSK_DTYPE(type, arena) \
+    t32 *Result = NULL; \
+    \
+    size_t DataSize = 1; \
+    for (u32 i = 0; i < shape_length; ++i) { DataSize *= shape[i]; } \
+    assert(DataSize != 0, "wrong shape given, cannot be zero"); \
+    \
+    u32 AllocShapeLength = shape_length; \
+    if(shape_length == 1) ++AllocShapeLength;\
+    size_t FinalSize = sizeof(t32) + sizeof(tensor_header) + \
+                       3*AllocShapeLength*sizeof(u32) + /* For Stride, Shape, SizesAccessPtr */ \
+                       2*sizeof(t32 *); /*  For tensor operands */ \
+    \
+    /* NOTE(Abid): Memory mapping */ \
+    Result = (t32 *)gzMemPushSize(arena, FinalSize); \
+    assert(Result, "storage memory cannot be allocated"); \
+    Result->Header = (tensor_header *)(Result+1); \
+    Result->Header->Sizes = (u32 *)(Result->Header+1); \
+    Result->Header->Strides = (u32 *)(Result->Header->Sizes + AllocShapeLength); \
+    Result->Header->AccessSizes = (u32 *)(Result->Header->Strides + AllocShapeLength); \
+    Result->Data.DType = dtype_##type; \
+    Result->Grad.DType = dtype_f32; \
+    Result->Header->IsContiguous = true; \
+    Result->Header->StorageNumElements = DataSize; \
+    /* NOTE(Abid): Setting whether to compute the backward pass or not */ \
+    Result->Header->ShouldGrad = false; \
+    Result->Header->DerivedOp.TensorOp = op_None; \
+    Result->Header->DerivedOp.OpContext = NULL;  \
+    \
+    Result->Header->DerivedOp.Operands = (t32 **)(Result->Header->AccessSizes + AllocShapeLength); \
+    Result->Header->Offset = 0; \
+    Result->Header->Dim = shape_length; \
+    memcpy(Result->Header->Sizes, shape, AllocShapeLength*sizeof(u32)); \
+    \
+    /* NOTE(Abid): Calculate the strides given the tensor shape */      \
+    for(u32 Idx = 0; Idx < Result->Header->Dim; ++Idx) {                \
+        if(Result->Header->Sizes[Idx] == 1) {                           \
+            Result->Header->Strides[Idx] = 0;                           \
+            continue;                                                   \
+        } else Result->Header->Strides[Idx] = 1;                        \
+        for(u32 Jdx = Idx+1; Jdx < Result->Header->Dim; ++Jdx) {        \
+            Result->Header->Strides[Idx] *= Result->Header->Sizes[Jdx]; \
+        }                                                               \
+    }                                                                   \
+    \
+    return Result
+
 
 /* NOTE(Abid): The minimum allocated space for Stride/Shape is 2*sizeof(u32),
  *             Since, it will ease up the math computations and allow reshape ops */
@@ -27,7 +74,7 @@
     \
     size_t DataSize = 1; \
     for (u32 i = 0; i < ShapeLength; ++i) { DataSize *= Shape[i]; } \
-    Assert(DataSize != 0, "wrong shape given, cannot be zero"); \
+    assert(DataSize != 0, "wrong shape given, cannot be zero"); \
     \
     u32 AllocShapeLength = ShapeLength; \
     if(ShapeLength == 1) ++AllocShapeLength;\
@@ -41,7 +88,7 @@
     /* NOTE(Abid): Memory mapping */ \
     Result = (t32 *)gzMemPushSize(Arena, FinalSize); \
     Result->Header = (tensor_header *)(Result+1); \
-    Assert(Result->Header, "storage memory cannot be allocated"); \
+    assert(Result->Header, "storage memory cannot be allocated"); \
     Result->Header->Sizes = (u32 *)(Result->Header+1); \
     Result->Header->Strides = (u32 *)(Result->Header->Sizes + AllocShapeLength); \
     Result->Header->AccessSizes = (u32 *)(Result->Header->Strides + AllocShapeLength); \
@@ -81,15 +128,20 @@
     \
     if(Data) { \
         /* NOTE(Abid): Check if the DataLength makes sense with the shape */ \
-        Assert(DataLength == DataSize, "data and tensor shape mismatch"); \
+        assert(DataLength == DataSize, "data and tensor shape mismatch"); \
         memcpy(Result->Data.Ptr, Data, DataSize*sizeof(TYPE)); \
     } \
     \
+    if(ShouldZero) memset(Result->Data.Ptr, 0, DataSize*sizeof(TYPE)); \
+    \
     return Result;
 
-#define gzTensorFromArray(Shape, Data, TYPE, ShouldGrad, Arena) _gzTensorAlloc##TYPE##(Shape, gzArrayLength(Shape), Data, gzArrayLength(Data), ShouldGrad, Arena)
-#define _gzTensorEmpty(Shape, ShapeLength, TYPE, ShouldGrad, Arena) _gzTensorAlloc##TYPE##(Shape, ShapeLength, 0, 0, ShouldGrad, Arena)
-#define gzTensorEmpty(Shape, TYPE, ShouldGrad, Arena) _gzTensorEmpty(Shape, gzArrayLength(Shape), TYPE, ShouldGrad, Arena)
+#define gzTensorFromArray(Shape, Data, TYPE, ShouldGrad, Arena) _gzTensorAlloc##TYPE(Shape, gzArrayLength(Shape), Data, gzArrayLength(Data), ShouldGrad, false, Arena)
+#define _gz_tensor_empty(Shape, ShapeLength, TYPE, ShouldGrad, Arena) _gzTensorAlloc##TYPE(Shape, ShapeLength, 0, 0, false, ShouldGrad, Arena)
+#define gz_tensor_empty(Shape, TYPE, ShouldGrad, Arena) _gz_tensor_empty(Shape, gz_array_length(Shape), TYPE, ShouldGrad, Arena)
+
+#define _gz_tensor_zero(Shape, ShapeLength, TYPE, ShouldGrad, Arena) _gzTensorAlloc##TYPE(Shape, ShapeLength, 0, 0, true, ShouldGrad, Arena)
+#define gz_tensor_zero(Shape, TYPE, ShouldGrad, Arena) _gz_tensor_zero(Shape, gz_array_length(Shape), TYPE, ShouldGrad, Arena)
 
 internal void
 gzCalculateStride(u32 *Strides, u32 *Sizes, u32 Dim) {
@@ -106,17 +158,120 @@ gzCalculateStride(u32 *Strides, u32 *Sizes, u32 Dim) {
 }
 
 internal inline t32 *
-_gzTensorAllocf32(u32 *Shape, u32 ShapeLength, f32 *Data, size_t DataLength, bool ShouldGrad, mem_arena *Arena)
+_gzTensorAllocf32(u32 *Shape, u32 ShapeLength, f32 *Data, size_t DataLength, bool ShouldGrad, bool ShouldZero, mem_arena *Arena)
 { __ALLOC_TENSOR_DTYPE(f32, ShouldGrad, Arena); }
 
 internal inline t32 *
-_gzTensorAlloci32(u32 *Shape, u32 ShapeLength, i32 *Data, size_t DataLength, bool ShouldGrad, mem_arena *Arena)
+_gzTensorAlloci32(u32 *Shape, u32 ShapeLength, i32 *Data, size_t DataLength, bool ShouldGrad, bool ShouldZero, mem_arena *Arena)
 { __ALLOC_TENSOR_DTYPE(i32, ShouldGrad, Arena); }
 
-#define gzTensorNormal(Shape, Mean, Std, ShouldGrad, Arena) _gzTensorNormal(Shape, gzArrayLength(Shape), Mean, Std, ShouldGrad, Arena)
+#define __TO_TENSOR_TYPE(type) dtype_##type; 
+
+internal inline t32 *
+_gz_tensor_alloc_huskf32_batched(u64 *shape, u64 shape_length, u64 batch_size, mem_arena *arena) {
+    t32 *Result = NULL;
+    shape_length = shape_length + 1;
+
+    size_t DataSize = 1;
+    for (u32 i = 0; i < shape_length; ++i) { DataSize *= shape[i]; }
+    assert(DataSize != 0, "wrong shape given, cannot be zero");
+
+    u32 AllocShapeLength = shape_length;
+    if(shape_length == 1) ++AllocShapeLength;
+    size_t FinalSize = sizeof(t32) + sizeof(tensor_header) +
+                       3*AllocShapeLength*sizeof(u32) + /* For Stride, Shape, SizesAccessPtr */
+                       2*sizeof(t32 *); /*  For tensor operands */
+
+    /* NOTE(Abid): Memory mapping */
+    Result = (t32 *)gzMemPushSize(arena, FinalSize); 
+    assert(Result, "storage memory cannot be allocated"); 
+    Result->Header = (tensor_header *)(Result+1); 
+    Result->Header->Sizes = (u32 *)(Result->Header+1); 
+    Result->Header->Strides = (u32 *)(Result->Header->Sizes + AllocShapeLength); 
+    Result->Header->AccessSizes = (u32 *)(Result->Header->Strides + AllocShapeLength); 
+    Result->Data.DType = __TO_TENSOR_TYPE(f32);
+    Result->Grad.DType = dtype_f32; 
+    Result->Header->IsContiguous = true; 
+    Result->Header->StorageNumElements = DataSize; 
+    /* NOTE(Abid): Setting whether to compute the backward pass or not */ 
+    Result->Header->ShouldGrad = false; 
+    Result->Header->DerivedOp.TensorOp = op_None; 
+    Result->Header->DerivedOp.OpContext = NULL;  
+    
+    Result->Header->DerivedOp.Operands = (t32 **)(Result->Header->AccessSizes + AllocShapeLength); 
+    Result->Header->Offset = 0; 
+    Result->Header->Dim = shape_length;
+
+    Result->Header->Sizes[0] = batch_size;
+    memcpy(Result->Header->Sizes + 1, shape, AllocShapeLength*sizeof(u32)); 
+    
+    /* NOTE(Abid): Calculate the strides given the tensor shape */      
+    for(u32 Idx = 0; Idx < Result->Header->Dim; ++Idx) {                
+        if(Result->Header->Sizes[Idx] == 1) {                           
+            Result->Header->Strides[Idx] = 0;                           
+            continue;                                                   
+        } else Result->Header->Strides[Idx] = 1;                        
+        for(u32 Jdx = Idx+1; Jdx < Result->Header->Dim; ++Jdx) {        
+            Result->Header->Strides[Idx] *= Result->Header->Sizes[Jdx]; 
+        }                                                               
+    }                                                                   
+    
+    return Result;
+}
+
+internal inline t32 *
+_gz_tensor_alloc_huskf32(u64 *shape, u64 shape_length, mem_arena *arena) { 
+    t32 *Result = NULL;
+
+    size_t DataSize = 1;
+    for (u32 i = 0; i < shape_length; ++i) { DataSize *= shape[i]; }
+    assert(DataSize != 0, "wrong shape given, cannot be zero");
+
+    u32 AllocShapeLength = shape_length;
+    if(shape_length == 1) ++AllocShapeLength;
+    size_t FinalSize = sizeof(t32) + sizeof(tensor_header) +
+                       3*AllocShapeLength*sizeof(u32) + /* For Stride, Shape, SizesAccessPtr */
+                       2*sizeof(t32 *); /*  For tensor operands */
+
+    /* NOTE(Abid): Memory mapping */
+    Result = (t32 *)gzMemPushSize(arena, FinalSize); 
+    assert(Result, "storage memory cannot be allocated"); 
+    Result->Header = (tensor_header *)(Result+1); 
+    Result->Header->Sizes = (u32 *)(Result->Header+1); 
+    Result->Header->Strides = (u32 *)(Result->Header->Sizes + AllocShapeLength); 
+    Result->Header->AccessSizes = (u32 *)(Result->Header->Strides + AllocShapeLength); 
+    Result->Data.DType = __TO_TENSOR_TYPE(f32);
+    Result->Grad.DType = dtype_f32; 
+    Result->Header->IsContiguous = true; 
+    Result->Header->StorageNumElements = DataSize; 
+    /* NOTE(Abid): Setting whether to compute the backward pass or not */ 
+    Result->Header->ShouldGrad = false; 
+    Result->Header->DerivedOp.TensorOp = op_None; 
+    Result->Header->DerivedOp.OpContext = NULL;  
+    
+    Result->Header->DerivedOp.Operands = (t32 **)(Result->Header->AccessSizes + AllocShapeLength); 
+    Result->Header->Offset = 0; 
+    Result->Header->Dim = shape_length; 
+    memcpy(Result->Header->Sizes, shape, AllocShapeLength*sizeof(u32)); 
+    
+    /* NOTE(Abid): Calculate the strides given the tensor shape */      
+    for(u32 Idx = 0; Idx < Result->Header->Dim; ++Idx) {                
+        if(Result->Header->Sizes[Idx] == 1) {                           
+            Result->Header->Strides[Idx] = 0;                           
+            continue;                                                   
+        } else Result->Header->Strides[Idx] = 1;                        
+        for(u32 Jdx = Idx+1; Jdx < Result->Header->Dim; ++Jdx) {        
+            Result->Header->Strides[Idx] *= Result->Header->Sizes[Jdx]; 
+        }                                                               
+    }                                                                   
+    
+    return Result;
+}
+
+#define gzTensorNormal(Shape, Mean, Std, ShouldGrad, Arena) _gzTensorNormal(Shape, gz_array_length(Shape), Mean, Std, ShouldGrad, Arena)
 internal inline t32 *
 _gzTensorNormal(u32 *Shape, u32 ShapeLength, f64 Mean, f64 Std, bool ShouldGrad, mem_arena *Arena) {
-    t32 *Tensor = _gzTensorAllocf32(Shape, ShapeLength, 0, 0, ShouldGrad, Arena);
+    t32 *Tensor = _gzTensorAllocf32(Shape, ShapeLength, 0, 0, ShouldGrad, false, Arena);
 
     size_t NumData = Tensor->Header->StorageNumElements;
     for(size_t Idx = 0; Idx <= NumData; ++Idx) {
@@ -143,7 +298,7 @@ gzGetStorageSize(u32 *Sizes, u32 Dim) {
     size_t Result = 1;
 
     for (u32 Idx = 0; Idx < Dim; ++Idx) {
-        Assert(Sizes[Idx], "tensor shape cannot be zero")
+        assert(Sizes[Idx], "tensor shape cannot be zero")
         Result *= Sizes[Idx];
     }
 
@@ -169,7 +324,7 @@ internal inline bool
 T32IsClose(t32 *A, t32 *B) {
     bool Result = true;
 
-    Assert(IsShapeEqual(A->Header, B->Header), "tensors of comparison must be the same shape");
+    assert(IsShapeEqual(A->Header, B->Header), "tensors of comparison must be the same shape");
     usize NumElements = A->Header->StorageNumElements;
     for(usize Idx = 0; Idx < NumElements; ++Idx) {
     }
@@ -218,7 +373,7 @@ T32IsClose(t32 *A, t32 *B) {
     } \
     printf("\n\n")
 internal void
-gzPrint(t32 *A) {
+gz_print(t32 *A) {
     i32 MaxPrintWidth = 20;
     i32 PrintCount = 0;
 
@@ -228,7 +383,7 @@ gzPrint(t32 *A) {
     {
         case dtype_i32: { __PRINT_DTYPE("tensor i32", "%d", i32); } break;
         case dtype_f32: { __PRINT_DTYPE("tensor f32", "%.4f", f32); } break;
-        default: Assert(0, "invalid code path");
+        default: assert(0, "invalid code path");
     }
 }
 #undef __PRINT_DTYPE
@@ -248,8 +403,8 @@ gzSwapDataGrad(t32 *Tensor) {
 
 internal inline void
 gzReduceSumAll_(t32 *A, t32 *Result) {
-    Assert((Result->Header->Dim == 1) && (Result->Header->Sizes[0] == 1), "result tensor must be of shape (1)");
-    Assert(Result->Data.Ptr, "tensor storage not found");
+    assert((Result->Header->Dim == 1) && (Result->Header->Sizes[0] == 1), "result tensor must be of shape (1)");
+    assert(Result->Data.Ptr, "tensor storage not found");
 
     f32 ResSum = 0;
     switch (A->Data.DType) {
@@ -261,7 +416,7 @@ gzReduceSumAll_(t32 *A, t32 *Result) {
             for(i32 Idx = 0; Idx < A->Header->StorageNumElements; ++Idx)
                 ResSum += *(f32 *)A->Data.Ptr + Idx;
         } break;
-        default: Assert(0, "invalid code path");
+        default: assert(0, "invalid code path");
     }
     if(Result->Data.DType == dtype_i32) *(i32 *)Result->Data.Ptr = (i32)ResSum;
     else *(f32 *)Result->Data.Ptr = ResSum;
@@ -272,7 +427,7 @@ gzReduceSumAll_(t32 *A, t32 *Result) {
 internal inline t32 *
 gzReduceSumAll(t32 *A, mem_arena *Arena) {
     u32 ResultShape[] = {1};
-    t32 *Result = _gzTensorAllocf32(ResultShape, 1, 0, 0, A->Header->ShouldGrad, Arena);
+    t32 *Result = _gzTensorAllocf32(ResultShape, 1, 0, 0, A->Header->ShouldGrad, false, Arena);
     gzReduceSumAll_(A, Result);
 
     return Result;
@@ -352,22 +507,22 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
     }
 
 #define __BIN_ELEMENTWISE_OP(A, B, Result, OP) \
-    /* NOTE(Abid): Assert here that result does match the highest dim and sizes (broadcast size as well) */ \
+    /* NOTE(Abid): assert here that result does match the highest dim and sizes (broadcast size as well) */ \
     u32 GreaterDim = 0; \
     if (A->Header->Dim > B->Header->Dim) GreaterDim = A->Header->Dim; \
     else GreaterDim = B->Header->Dim; \
-    Assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch"); \
+    assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch"); \
     for(u32 Idx = 1; Idx <= GreaterDim; Idx++) { \
         u32 ASize = 0; \
         u32 BSize = 0; \
         if((i32)(A->Header->Dim - Idx) >= 0) ASize = A->Header->Sizes[A->Header->Dim - Idx]; \
         if((i32)(B->Header->Dim - Idx) >= 0) BSize = B->Header->Sizes[B->Header->Dim - Idx]; \
         /* NOTE(Abid): Check for shape alignment for the operands */ \
-        Assert(((ASize > BSize) && ((BSize == 1) || (BSize == 0))) || \
+        assert(((ASize > BSize) && ((BSize == 1) || (BSize == 0))) || \
                ((BSize > ASize) && ((ASize == 1) || (ASize == 0))) || \
                (BSize == ASize), "operand(s) shape mismatch"); \
         u32 GreaterSize = ASize > BSize ? ASize : BSize; \
-        Assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch"); \
+        assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch"); \
     } \
     \
     /* NOTE(Abid): Initialize variables */ \
@@ -398,7 +553,7 @@ _CheckEndofDimAndUpdate(tensor_header *AHeader, tensor_header *BHeader, tensor_h
         case bin_op_dtypes_float_int_int:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, f32, i32, i32, OP); } break; \
         case bin_op_dtypes_int_float_float: { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, i32, f32, f32, OP); } break; \
         case bin_op_dtypes_int_float_int:   { __BIN_ELEMENTWISE_OP_DTYPE(A, B, Result, i32, f32, i32, OP); } break; \
-        default:                            Assert(0, "Invalid Code Path");                                         \
+        default:                            assert(0, "Invalid Code Path");                                         \
     }
 typedef enum {
     bin_op_dtypes_all_float = 0,
@@ -446,7 +601,7 @@ internal inline u32
 gzGetIndex(u32 Dim, i32 Index) {
     i32 Result = (i32)Dim + Index;
     if(Result < 0) Result = 0;
-    Assert(Result < (i32)(2*Dim), "index out of bounds");
+    assert(Result < (i32)(2*Dim), "index out of bounds");
     return Result % Dim;
 }
 
@@ -568,7 +723,7 @@ gzGetIndex(u32 Dim, i32 Index) {
 /* TODO(Abid): This really needs to be refactored */
 internal void 
 gzMatMul(t32 *A, t32 *B, t32 *Result) {
-    /* NOTE(Abid): Assert greater dim is the same as the result tensors' dim */
+    /* NOTE(Abid): assert greater dim is the same as the result tensors' dim */
     u32 GreaterDim = 0;
     u32 LesserDim = 0;
     u32 ResLastBroadDim = 0;
@@ -577,7 +732,7 @@ gzMatMul(t32 *A, t32 *B, t32 *Result) {
     else { GreaterDim = B->Header->Dim; LesserDim = A->Header->Dim; }
     if(LesserDim > 1) ResLastBroadDim = 3;
     else ResLastBroadDim = 2;
-    Assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch");
+    assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch");
 
     u32 ALastIdx = gzGetIndex(A->Header->Dim, -1);
     u32 ASecondLastIdx = gzGetIndex(A->Header->Dim, -2);
@@ -585,13 +740,13 @@ gzMatMul(t32 *A, t32 *B, t32 *Result) {
     u32 BLastIdx = gzGetIndex(B->Header->Dim, -1);
     u32 BSecondLastIdx = gzGetIndex(B->Header->Dim, -2);
     /* NOTE(Abid): Assert here the tensor operand(s) can be matrix-multiplied */
-    Assert(A->Header->Sizes[ALastIdx] == B->Header->Sizes[BSecondLastIdx],
+    assert(A->Header->Sizes[ALastIdx] == B->Header->Sizes[BSecondLastIdx],
            "operand(s) shape mismatch for MatMul operation");
 
     /* NOTE(Abid): Assert the shapes of the result tensor match with the MatMul operation's required shape.
      *             1. In case, the lesserDim is 1, then we expect the last dimension of result to be 1 as well
      *             2. Otherwise, the dimensions must match with the result of the MatMul operation. */
-    Assert(((LesserDim > 1) && (
+    assert(((LesserDim > 1) && (
                                     (A->Header->Sizes[gzGetIndex(A->Header->Dim, -2)] ==
                                      Result->Header->Sizes[gzGetIndex(Result->Header->Dim, -2)]) &&
                                     (B->Header->Sizes[gzGetIndex(B->Header->Dim, -1)] ==
@@ -608,11 +763,11 @@ gzMatMul(t32 *A, t32 *B, t32 *Result) {
         if((i32)(B->Header->Dim - Idx) >= 0) BSize = B->Header->Sizes[B->Header->Dim - Idx];
         /* NOTE(Abid): Check for shape alignment for the operands */
         bool IsAGreater = ASize > BSize;
-        Assert((IsAGreater && ((BSize == 1) || (BSize == 0))) ||
+        assert((IsAGreater && ((BSize == 1) || (BSize == 0))) ||
                ((BSize > ASize) && ((ASize == 1) || (ASize == 0))) ||
                (BSize == ASize), "operand(s) shape mismatch");
         u32 GreaterSize = IsAGreater ? ASize : BSize;
-        Assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch");
+        assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch");
     }
 
     /* NOTE(Abid): Initialize variables */
@@ -646,7 +801,7 @@ gzMatMul(t32 *A, t32 *B, t32 *Result) {
         case bin_op_dtypes_float_int_int:   { __GZ_BIN_MATMUL_DTYPE(A, B, Result, f32, i32, i32, =); } break;
         case bin_op_dtypes_int_float_float: { __GZ_BIN_MATMUL_DTYPE(A, B, Result, i32, f32, f32, =); } break;
         case bin_op_dtypes_int_float_int:   { __GZ_BIN_MATMUL_DTYPE(A, B, Result, i32, f32, i32, =); } break;
-        default:                            Assert(0, "Invalid Code Path");
+        default:                            assert(0, "Invalid Code Path");
     }
 
     Result->Header->DerivedOp.TensorOp = op_BinaryMatmul;
@@ -656,7 +811,7 @@ gzMatMul(t32 *A, t32 *B, t32 *Result) {
 
 internal void
 __gzMatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
-    /* NOTE(Abid): Assert greater dim is the same as the result tensors' dim */
+    /* NOTE(Abid): assert greater dim is the same as the result tensors' dim */
     u32 GreaterDim = 0;
     u32 LesserDim = 0;
     u32 ResLastBroadDim = 0;
@@ -665,7 +820,7 @@ __gzMatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
     else { GreaterDim = B->Header->Dim; LesserDim = A->Header->Dim; }
     if(LesserDim > 1) ResLastBroadDim = 3;
     else ResLastBroadDim = 2;
-    Assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch");
+    assert(Result->Header->Dim == GreaterDim, "result-operand(s) dimension mismatch");
 
     u32 ALastIdx = gzGetIndex(A->Header->Dim, -1);
     u32 ASecondLastIdx = gzGetIndex(A->Header->Dim, -2);
@@ -673,13 +828,13 @@ __gzMatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
     u32 BLastIdx = gzGetIndex(B->Header->Dim, -1);
     u32 BSecondLastIdx = gzGetIndex(B->Header->Dim, -2);
     /* NOTE(Abid): Assert here the tensor operand(s) can be matrix-multiplied */
-    Assert(A->Header->Sizes[ALastIdx] == B->Header->Sizes[BSecondLastIdx],
+    assert(A->Header->Sizes[ALastIdx] == B->Header->Sizes[BSecondLastIdx],
            "operand(s) shape mismatch for MatMul operation");
 
     /* NOTE(Abid): Assert the shapes of the result tensor match with the MatMul operation's required shape.
      *             1. In case, the lesserDim is 1, then we expect the last dimension of result to be 1 as well
      *             2. Otherwise, the dimensions must match with the result of the MatMul operation. */
-    Assert(((LesserDim > 1) && (
+    assert(((LesserDim > 1) && (
                                     (A->Header->Sizes[gzGetIndex(A->Header->Dim, -2)] ==
                                      Result->Header->Sizes[gzGetIndex(Result->Header->Dim, -2)]) &&
                                     (B->Header->Sizes[gzGetIndex(B->Header->Dim, -1)] ==
@@ -696,11 +851,11 @@ __gzMatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
         if((i32)(B->Header->Dim - Idx) >= 0) BSize = B->Header->Sizes[B->Header->Dim - Idx];
         /* NOTE(Abid): Check for shape alignment for the operands */
         bool IsAGreater = ASize > BSize;
-        Assert((IsAGreater && ((BSize == 1) || (BSize == 0))) ||
+        assert((IsAGreater && ((BSize == 1) || (BSize == 0))) ||
                ((BSize > ASize) && ((ASize == 1) || (ASize == 0))) ||
                (BSize == ASize), "operand(s) shape mismatch");
         u32 GreaterSize = IsAGreater ? ASize : BSize;
-        Assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch");
+        assert(Result->Header->Sizes[Result->Header->Dim - Idx] == GreaterSize, "result-operand(s) shape mismatch");
     }
 
     /* NOTE(Abid): Initialize variables */
@@ -734,7 +889,7 @@ __gzMatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
         case bin_op_dtypes_float_int_int:   { __GZ_BIN_MATMUL_DTYPE(A, B, Result, f32, i32, i32, +=); } break;
         case bin_op_dtypes_int_float_float: { __GZ_BIN_MATMUL_DTYPE(A, B, Result, i32, f32, f32, +=); } break;
         case bin_op_dtypes_int_float_int:   { __GZ_BIN_MATMUL_DTYPE(A, B, Result, i32, f32, i32, +=); } break;
-        default:                            Assert(0, "Invalid Code Path");
+        default:                            assert(0, "Invalid Code Path");
     }
 }
 #undef __BIN_MATMUL_DTYPE
@@ -744,8 +899,8 @@ __gzMatMulAccumulate(t32 *A, t32 *B, t32 *Result) {
 internal void
 __gzSigmoidOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHead, f32 *ResStorage) {
 
-    Assert((SrcStorage != NULL) && (ResStorage != NULL), "null storage found");
-    Assert(gzIsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
+    assert((SrcStorage != NULL) && (ResStorage != NULL), "null storage found");
+    assert(gzIsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
 
     size_t ANumData = AHead->StorageNumElements;
     size_t ResultOffset = 0;
@@ -769,24 +924,32 @@ __gzSigmoidOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHe
     }
 }
 
-internal inline void
+inline internal void
 gz_sigmoid_(t32 *A, t32 *Result) {
-    Assert((A->Data.DType == Result->Data.DType) & (A->Data.DType == dtype_f32),
+    assert((A->Data.DType == Result->Data.DType) & (A->Data.DType == dtype_f32),
            "sigmoid require tensor(s) to be of type f32");
     __gzSigmoidOnStorage(A->Header, A->Data.Ptr, Result->Header, Result->Data.Ptr);
     Result->Header->DerivedOp.TensorOp = op_UnarySigmoid;
     Result->Header->DerivedOp.Operands[0] = A;
 }
 
+inline internal t32 *
+gz_sigmoid(t32 *tensor, mem_arena *arena) {
+    t32 *result = _gzTensorAllocf32(tensor->Header->Sizes, tensor->Header->Dim, 0, 0, tensor->Header->ShouldGrad, false, arena);
+    gz_sigmoid_(tensor, result);
+
+    return result;
+}
+
 internal void
-gzReLU_(t32 *A, t32 *Result) {
+gz_relu_(t32 *A, t32 *Result) {
     tensor_header *AHead = A->Header;
     f32 *AStorage = A->Data.Ptr;
     tensor_header *ResHead = Result->Header;
     f32 *ResStorage = Result->Data.Ptr;
 
-    Assert((AStorage != NULL) && (ResStorage != NULL), "null storage found");
-    Assert(gzIsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
+    assert((AStorage != NULL) && (ResStorage != NULL), "null storage found");
+    assert(gzIsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
 
     size_t ANumData = AHead->StorageNumElements;
     size_t ResultOffset = 0;
@@ -814,17 +977,17 @@ gzReLU_(t32 *A, t32 *Result) {
 }
 
 internal inline t32 *
-gzReLU(t32 *A, mem_arena *Arena) {
-    t32 *Result = _gzTensorAllocf32(A->Header->Sizes, A->Header->Dim, 0, 0, A->Header->ShouldGrad, Arena);
-    gzReLU_(A, Result);
+gz_relu(t32 *A, mem_arena *Arena) {
+    t32 *Result = _gzTensorAllocf32(A->Header->Sizes, A->Header->Dim, 0, 0, A->Header->ShouldGrad, false, Arena);
+    gz_relu_(A, Result);
 
     return Result;
 }
 
 internal void
 __LossLogOnStorage(tensor_header *AHead, f32 *SrcStorage, tensor_header *ResHead, f32 *ResStorage) {
-    Assert((SrcStorage != NULL) && (ResStorage != NULL), "null storage found");
-    Assert(gzIsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
+    assert((SrcStorage != NULL) && (ResStorage != NULL), "null storage found");
+    assert(gzIsShapeEqual(AHead, ResHead), "operand-result shape mismatch");
 
     size_t ANumData = AHead->StorageNumElements;
     size_t ResultOffset = 0;
@@ -865,9 +1028,9 @@ gzValidateViewOnTensor(t32 *A, u32 *NewShape, u32 NewShapeLength) {
 #define gzNewView(A, NewShape, Arena) _gzNewView(A, NewShape, gzArrayLength(NewShape), Arena)
 internal t32 *
 _gzNewView(t32 *A, u32 *NewShape, u32 NewShapeLength, mem_arena *Arena) {
-    Assert(A->Header->IsContiguous, "view a of non-contiguous tensor not allowed");
-    Assert(NewShapeLength > 0, "invalid view, dim cannot be %d", NewShapeLength);
-    Assert(gzValidateViewOnTensor(A, NewShape, NewShapeLength), "invalid view, shape-storage mismatch")
+    assert(A->Header->IsContiguous, "view a of non-contiguous tensor not allowed");
+    assert(NewShapeLength > 0, "invalid view, dim cannot be %d", NewShapeLength);
+    assert(gzValidateViewOnTensor(A, NewShape, NewShapeLength), "invalid view, shape-storage mismatch")
 
     t32 *Result = gzMemPushStruct(Arena, t32);
     Result->Header = gzMemPushStruct(Arena, tensor_header);
@@ -906,7 +1069,7 @@ _gzNewView(t32 *A, u32 *NewShape, u32 NewShapeLength, mem_arena *Arena) {
 internal t32 *
 gzTrimUnitSize(t32 *A, mem_arena *Arena) {
     bool IsValid = (A->Header->Dim > 1) && (A->Header->Sizes[A->Header->Dim-1] == 1);
-    Assert(IsValid, "cannot trim, trailing size is %d, with dim %d",
+    assert(IsValid, "cannot trim, trailing size is %d, with dim %d",
            A->Header->Sizes[A->Header->Dim-1], A->Header->Dim);
 
     return _gzNewView(A, A->Header->Sizes, A->Header->Dim-1, Arena);
@@ -936,13 +1099,13 @@ gzIsContiguous(t32 A) {
 internal void
 __gzReshapeInPlace(t32 A, i32 *NewSizes, u32 NewSizesLength) {
 
-    Assert(NewSizes && (NewSizesLength > 0), "must provide appropriate size values for reshaping operation");
+    assert(NewSizes && (NewSizesLength > 0), "must provide appropriate size values for reshaping operation");
     /* TODO(Abid): Support -1 indexing in reshaping for dimension that is leftover. */
     u32 TotalSizeProd = 1;
     for(u32 Idx = 0; Idx < NewSizesLength; ++Idx) {
         TotalSizeProd *= NewSizes[Idx];
     }
-    Assert(TotalSizeProd == A.Header->StorageNumElements, "invalid reshape sizes");
+    assert(TotalSizeProd == A.Header->StorageNumElements, "invalid reshape sizes");
 
     /* TODO(Abid): Reshape here, make sure the allocation of sizes, strides, and dim are done separately. */
 }
@@ -988,13 +1151,13 @@ internal inline void
 __gzTransposeInPlaceNoGrad(t32 *A, i32 Dim1, i32 Dim2)
 {
     /* TODO(Abid): Properly check if the transpose could make the tensor contiguous again. */
-    Assert(A->Header->IsContiguous, "cannot transpose non-contiguous tensor");
+    assert(A->Header->IsContiguous, "cannot transpose non-contiguous tensor");
 
     /* NOTE(Abid): Support for negative indexing. */
     Dim1 = (A->Header->Dim + Dim1) % A->Header->Dim;
     Dim2 = (A->Header->Dim + Dim2) % A->Header->Dim;
 
-    Assert(((i32)A->Header->Dim >= Dim1) && ((i32)A->Header->Dim >= Dim2), "dimension index out of bounds");
+    assert(((i32)A->Header->Dim >= Dim1) && ((i32)A->Header->Dim >= Dim2), "dimension index out of bounds");
 
     /* NOTE(Abid): Swap the sizes and strides */
     u32 Temp = A->Header->Sizes[Dim1];
@@ -1016,28 +1179,46 @@ gzTransposeInPlace(t32 *A, i32 Dim1, i32 Dim2) {
  * ================================= */
 
 inline internal void
-gzTensorListAdd(tensor_list *TensorList, t32 *Tensor) {
-    Assert(TensorList->Used < TensorList->Size, "Index out of range. Not enough space");
-    TensorList->Array[TensorList->Used++] = Tensor;
+gz_tensor_list_add(t32 *Tensor, tensor_list *TensorList) {
+    assert(TensorList->used < TensorList->size, "Index out of range. Not enough space");
+    TensorList->array[TensorList->used++] = Tensor;
 }
 
 inline internal tensor_list
-gzTensorListAllocate(usize Size, mem_arena *Arena) {
+gz_tensor_list_allocate(usize Size, mem_arena *Arena) {
     tensor_list TensorList = {0};
-    TensorList.Size = Size;
-    TensorList.Array = gzMemPushArray(Arena, t32 *, TensorList.Size);
+    TensorList.size = Size;
+    TensorList.array = gzMemPushArray(Arena, t32 *, TensorList.size);
 
     return TensorList;
 }
 
 internal tensor_list
 gzTensorListFromModule(module *Module, mem_arena *Arena) {
-    tensor_list TensorList = gzTensorListAllocate(Module->TensorList.Used, Arena);
-    for(u32 Idx = 0; Idx < Module->TensorList.Used; ++Idx) {
-        gzTensorListAdd(&TensorList, Module->TensorList.Array[Idx]);
+    tensor_list TensorList = gz_tensor_list_allocate(Module->weights.used, Arena);
+    for(u32 Idx = 0; Idx < Module->weights.used; ++Idx) {
+        gz_tensor_list_add(Module->weights.array[Idx], &TensorList);
     }
 
     return TensorList;
+}
+
+internal tensor_list
+gz_tensor_list_from_module_list(module **modules, u64 modules_length, mem_arena *arena) {
+    u64 total_tensors = 0;
+    for(u64 idx = 0; idx < modules_length; ++idx) {
+        total_tensors += modules[idx]->weights.used;
+    }
+
+    tensor_list list = gz_tensor_list_allocate(total_tensors, arena);
+    for(u32 idx = 0; idx < modules_length; ++idx) {
+        module* module = modules[idx];
+        for(u32 jdx = 0; jdx < module->weights.used; ++jdx) {
+            gz_tensor_list_add(module->weights.array[jdx], &list);
+        }
+    }
+
+    return list;
 }
 
 #if 0
@@ -1048,10 +1229,10 @@ T32Transpose(t32 A, i32 Dim1, i32 Dim2, t32 ResultTen)
     Dim1 = (A.Header->Dim + Dim1) % A.Header->Dim;
     Dim2 = (A.Header->Dim + Dim2) % A.Header->Dim;
 
-    Assert(ResultTen.Header->DType == A.Data.DType, "tensor type mismatch");
-    Assert(ResultTen.Header->StorageNumElements == A.Header->StorageNumElements, "tensor storage size mismatch");
-    Assert(Dim1 != Dim2, "incorrect dimensions for transpose; select two different dimensions");
-    Assert(((i32)A.Header->Dim >= Dim1) && ((i32)A.Header->Dim >= Dim2),
+    assert(ResultTen.Header->DType == A.Data.DType, "tensor type mismatch");
+    assert(ResultTen.Header->StorageNumElements == A.Header->StorageNumElements, "tensor storage size mismatch");
+    assert(Dim1 != Dim2, "incorrect dimensions for transpose; select two different dimensions");
+    assert(((i32)A.Header->Dim >= Dim1) && ((i32)A.Header->Dim >= Dim2),
            "dimension index out of bounds");
 
     u32 *NewSizes = ResultTen.Header->Sizes;
@@ -1071,7 +1252,7 @@ T32Transpose(t32 A, i32 Dim1, i32 Dim2, t32 ResultTen)
     /* Copy the tensor to the new one based on DType */
     if (A.Data.DType == dtype_f32) { _TRANSPOSED_COPY_TENSOR_DTYPE(f32) }
     else if (A.Data.DType == dtype_i32) { _TRANSPOSED_COPY_TENSOR_DTYPE(i32) }
-    else Assert(0, "invalid code path");
+    else assert(0, "invalid code path");
 
     /* NOTE(Abid): Add information for backpropagation */
     ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranpose;
@@ -1090,8 +1271,8 @@ T32Transpose(t32 A, i32 Dim1, i32 Dim2, t32 ResultTen)
 internal t32
 T32TransposeAll(t32 A, t32 ResultTen)
 {
-    Assert(ResultTen.Header->DType == A.Data.DType, "tensor type mismatch");
-    Assert(GetStorageSize(ResultTen.Header->Sizes, ResultTen.Header->Dim) == GetStorageSize(A.Header->Sizes, A.Header->Dim),
+    assert(ResultTen.Header->DType == A.Data.DType, "tensor type mismatch");
+    assert(GetStorageSize(ResultTen.Header->Sizes, ResultTen.Header->Dim) == GetStorageSize(A.Header->Sizes, A.Header->Dim),
            "tensor storage size mismatch");
 
     u32 *NewSizes = ResultTen.Header->Sizes;
@@ -1111,7 +1292,7 @@ T32TransposeAll(t32 A, t32 ResultTen)
 
     if (A.Data.DType == dtype_f32) { _TRANSPOSED_COPY_TENSOR_DTYPE(f32) }
     else if (A.Data.DType == dtype_i32) { _TRANSPOSED_COPY_TENSOR_DTYPE(i32) }
-    else Assert(0, "invalid code path");
+    else assert(0, "invalid code path");
 
     /* NOTE(Abid): Add information for backpropagation */
     ResultTen.Header->DerivedOp.TensorOp = op_UnaryTranposeAll;

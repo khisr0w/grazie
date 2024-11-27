@@ -84,10 +84,16 @@ struct t32 {
 };
 
 typedef struct {
-    t32 **Array;
-    usize Size;
-    usize Used;
+    t32 **array;
+    usize size;
+    usize used;
 } tensor_list;
+
+typedef enum {
+    reduce_none = 0,
+    reduce_mean = 1,
+    reduce_sum  = 2,
+} reduce_method;
 
 #define TENSOR_H
 #endif
