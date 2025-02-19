@@ -17,7 +17,7 @@ typedef struct {
 } dataset;
 
 inline internal dataset
-dataset_build(f32 *stream, u64 stream_length, u64 batch_size, u64 *shape, u64 shape_length, mem_arena *arena) {
+gz_dataset_build(f32 *stream, u64 stream_length, u64 batch_size, u64 *shape, u64 shape_length, mem_arena *arena) {
     dataset result = {0};
 
     /* TODO(abid): Have more types than just `f32`. */
@@ -36,7 +36,7 @@ dataset_build(f32 *stream, u64 stream_length, u64 batch_size, u64 *shape, u64 sh
 }
 
 inline internal t32 *
-dataset_index(dataset *dataset, u64 idx) {
+gz_dataset_index(dataset *dataset, u64 idx) {
     assert(idx < dataset->length, "dataset index out of bounds");
     dataset->base_tensor->Data.Ptr = dataset->stream + dataset->stride*idx;
 

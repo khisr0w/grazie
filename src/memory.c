@@ -81,7 +81,7 @@ gzMemAligmentOffset(mem_arena *Arena, usize Alignment) {
 	return AlignmentOffset;
 }
 
-#define gzMemPushStruct(Arena, Type) (Type *)gzMemPushSize(Arena, sizeof(Type))
+#define gz_mem_push_struct(Type, Arena) (Type *)gzMemPushSize(Arena, sizeof(Type))
 #define gzMemPushArray(Arena, Type, Count) (Type *)gzMemPushSize(Arena, (Count)*sizeof(Type))
 internal void *
 gzMemPushSize(mem_arena *Arena, usize Size) {

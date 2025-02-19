@@ -43,7 +43,7 @@ __gzPlatformInitRandSeed() {
     /* NOTE(Abid): Get the cryptograhic number generator method */
     BCRYPT_ALG_HANDLE CNGProvider;
     NTSTATUS Result = BCryptOpenAlgorithmProvider(&CNGProvider, BCRYPT_RNG_ALGORITHM, NULL, 0);
-    Assert(Result == ((NTSTATUS)0x00000000L), "could not init cryptographic algorithm provider");
+    assert(Result == ((NTSTATUS)0x00000000L), "could not init cryptographic algorithm provider");
 
     /* NOTE(Abid): Generate random Seed value. */
     BCryptGenRandom(CNGProvider, (PUCHAR)&Seed, 8, 0);

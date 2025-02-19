@@ -4,7 +4,7 @@
     |    Creation date:  4/21/2023 10:49:09 PM                                         |
     |    Last Modified:                                                                |
     |                                                                                  |
-    +=====================| Sayed Abid Hashimi, Copyright © All rights reserved |======+  */
+    +==================================================| Sayed Abid Hashimi |==========+  */
 
 #include "autograd.h"
 
@@ -316,7 +316,7 @@ __gzBackwardMatMul(t32 **Operands, t32 *Parent, u32 OperandIdx) {
     for(size_t OpNum = 1; OpNum <= TotalMatMulOps; ++OpNum) {
         for(u32 ReduceDimIdx = 0; ReduceDimIdx < ReducedDimSize; ++ReduceDimIdx) {
             *((f32 *)ResOper->Grad.Ptr + ResultOffset) += *((f32 *)FirstOperValPtr + FirstOffset) *
-                                                                    *((f32 *)SecOperValPtr + SecondOffset);
+                                                          *((f32 *)SecOperValPtr + SecondOffset);
             FirstOffset += GetStrideR(FirstOper, 0);
             SecondOffset += GetStrideR(SecOper, 1);
         }
@@ -442,6 +442,54 @@ __gzBackwardReLU(t32 *Operand, t32 *Parent) {
     }
 }
 
+internal void
+__gz_backward_loss_binary_cross_entropy(t32 *operand, t32 *y, t32 *parent, reduce_method method) {
+    /* NOTE(abid): Backward pass for the binary cross entropy in case of `reduce_method != none`.
+     * Params:
+     *     t32 *operand: The main operand with grad == true. If used as loss, this will be y_hat.
+     *     t32 *y: Reference operand assumed grad == false. If used as loss, this will be y. 
+     *     t32 *parent: The resultant value(s) of both operands. If used as loss, this is the loss value.
+     */
+
+    assert(gzIsShapeEqual(operand->Header, y->Header), "operand(s) shape mismatch.");
+    assert((parent->Header->Dim == 1) && (parent->Header->Sizes[0] == 1),
+           "cannot backward loss when `reduce == none`.");
+    f32 epsilon = 1e-16f;
+    size_t operand_num_data = operand->Header->StorageNumElements;
+    size_t operand_offset = 0;
+    size_t y_offset = 0;
+    size_t parent_offset = 0;
+    f32 parent_grad = ((f32 *)parent->Grad.Ptr)[parent_offset];
+
+    /* NOTE(abid): In case we are using mean as reduce method. */
+    f32 divider = 1.f;
+    if(method == reduce_mean) divider = 1.f / operand->Header->StorageNumElements;
+
+    for(size_t num_op = 1; num_op <= operand_num_data; ++num_op) {
+        f32 y_data = ((f32 *)y->Data.Ptr)[y_offset];
+        f32 operand_data = ((f32 *)operand->Data.Ptr)[operand_offset];
+        f32 *operand_grad = ((f32 *)operand->Grad.Ptr) + operand_offset;
+
+        *operand_grad += parent_grad*(-(y_data / (operand_data + epsilon)) + ((1-y_data) / (1 - operand_data + epsilon)))*divider;
+
+        i32 dim_max_num_so_far = 1;
+        for(i32 dim_idx = 1; dim_idx <= (i32)operand->Header->Dim; ++dim_idx) {
+            dim_max_num_so_far *= operand->Header->Sizes[operand->Header->Dim-dim_idx];
+            if(num_op % dim_max_num_so_far == 0) {
+                operand_offset -= operand->Header->Strides[operand->Header->Dim-dim_idx]*
+                                  (operand->Header->Sizes[operand->Header->Dim-dim_idx]-1);
+                y_offset -= y->Header->Strides[y->Header->Dim-dim_idx]*
+                            (y->Header->Sizes[y->Header->Dim-dim_idx]-1);
+                continue;
+            }
+            operand_offset += operand->Header->Strides[operand->Header->Dim-dim_idx];
+            y_offset += y->Header->Strides[y->Header->Dim-dim_idx];
+            break;
+        }
+    }
+
+}
+
 #if 0
 internal inline void
 __SqueezeEmptyDims(t32 *A) {
@@ -466,7 +514,6 @@ __SqueezeEmptyDims(t32 *A) {
  *             transient gradient calculation for non-leaf tensors. Then, on the second run, we
  *             can completely forgo any allocation at all. */
 /* TODO(Abid): Have to see if the current routine does adhere to the rules of `topological sort` */
-/* TODO(Abid): In the end, add an Assert so that RootTensor should only have shape=(1). */
 
 /* NOTE(Abid): If for a differentiable operation, one of the operands is also the result tensor,
  *             then we have nasty infinite loop on our hands.
@@ -479,8 +526,8 @@ __SqueezeEmptyDims(t32 *A) {
 internal void
 gz_backprop(t32 *RootTensor) {
     /* NOTE(Abid): Here's how `gzBackprop` works:
-     * - The function will loop through the computation tree and calculate
-     *   the gradient. That means it will not be recursive (at least for now).
+     * - The function will loop through the computation tree and calculate the gradient.
+     *   That means it will not be recursive (at least for now).
      *
      * - In order to keep track of the tensors we want to traverse, we use a stack.
      *
@@ -541,7 +588,7 @@ gz_backprop(t32 *RootTensor) {
         t32 *CurrentTensor = gzStackBlockTop(&StackState);
         tensor_op CurrentOp = CurrentTensor->Header->DerivedOp.TensorOp;
         gzStackBlockPop(&StackState);
-        if(!CurrentTensor->Header->ShouldGrad || CurrentOp == op_None) continue;
+        if(!CurrentTensor->Header->ShouldGrad || CurrentOp == op_none) continue;
 
         assert(CurrentTensor->Header->DerivedOp.Operands, "tensor op set without operand(s)");
         assert(CurrentTensor->Header->DerivedOp.Operands+1, "tensor op set without operand(s)");
@@ -549,79 +596,85 @@ gz_backprop(t32 *RootTensor) {
         Operands[0] = CurrentTensor->Header->DerivedOp.Operands[0];
         Operands[1] = CurrentTensor->Header->DerivedOp.Operands[1];
 
-        assert(Operands[0]->Grad.Ptr, "grad storage not found");
-        assert((CurrentOp > op_UnaryEnd  && Operands[1]->Grad.Ptr) ||
-               CurrentOp < op_UnaryEnd, "grad storage not found");
+        /* assert((CurrentOp > op_binary_begin && CurrentOp < op_binary_end) ? Operands[1]->Grad.Ptr && Operands[0]->Grad.Ptr
+                                                                          : Operands[0]->Grad.Ptr,
+               "grad storage not found"); */
         assert(CurrentTensor->Data.DType == dtype_f32, "cannot backpropagate through a non-float tensor")
         assert(Operands[0]->Data.DType == dtype_f32, "cannot backpropagate through a non-float tensor")
-        assert((CurrentOp > op_UnaryEnd  && Operands[1]->Data.DType == dtype_f32) ||
-               CurrentOp < op_UnaryEnd, "cannot backpropagate through a non-float tensor")
+        assert((CurrentOp > op_unary_end  && Operands[1]->Data.DType == dtype_f32) ||
+               CurrentOp < op_unary_end, "cannot backpropagate through a non-float tensor")
 
         switch (CurrentOp) {
-            case op_UnaryNegate: {
+            case op_unary_negate: {
             } break;
-            case op_UnaryBroadcast: {
+            case op_unary_broadcast: {
             } break;
-            case op_UnaryTranpose: {
+            case op_unary_tranpose: {
             } break;
-            case op_UnaryTranposeAll: {
+            case op_unary_tranpose_all: {
             } break;
-            case op_UnaryReduceSumAll: {
+            case op_unary_reduce_sum_all: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
                 gzStackBlockPush(&StackState, Operand);
 
                 __gzBackwardAddToElements(Operand, *(f32 *)CurrentTensor->Grad.Ptr);
             } break;
-            case op_UnarySigmoid: {
+            case op_unary_sigmoid: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
                 gzStackBlockPush(&StackState, Operand);
 
                 __gzBackwardSigmoid(Operand, CurrentTensor);
             } break;
-            case op_UnaryReLU: {
+            case op_unary_relu: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
                 gzStackBlockPush(&StackState, Operand);
 
                 __gzBackwardReLU(Operand, CurrentTensor);
             } break;
-            case op_UnaryView: {
+            case op_unary_view: {
                 t32 *Operand = CurrentTensor->Header->DerivedOp.Operands[0];
                 gzStackBlockPush(&StackState, Operand);
             } break;
-            case op_BinaryAdd: {
+            case op_binary_add: {
                 gzStackBlockPush(&StackState, Operands[1]);
                 gzStackBlockPush(&StackState, Operands[0]);
 
                 __gzBackwardReduceAddBroadcast(CurrentTensor, Operands[0]);
                 __gzBackwardReduceAddBroadcast(CurrentTensor, Operands[1]);
             } break;
-            case op_BinarySub: {
+            case op_binary_sub: {
                 gzStackBlockPush(&StackState, Operands[1]);
                 gzStackBlockPush(&StackState, Operands[0]);
 
                 __gzBackwardReduceAddBroadcast(CurrentTensor, Operands[0]);
                 __gzBackwardReduceSubBroadcast(CurrentTensor, Operands[1]);
             } break;
-            case op_BinaryMul: {
+            case op_binary_mul: {
                 gzStackBlockPush(&StackState, Operands[1]);
                 gzStackBlockPush(&StackState, Operands[0]);
 
                 __gzBackwardMul(Operands[1], CurrentTensor, Operands[0]);
                 __gzBackwardMul(Operands[0], CurrentTensor, Operands[1]);
             } break;
-            case op_BinaryDiv: {
+            case op_binary_div: {
                 gzStackBlockPush(&StackState, Operands[1]);
                 gzStackBlockPush(&StackState, Operands[0]);
 
                 __gzBackwardDiv(Operands[1], CurrentTensor, Operands[0], 0);
                 __gzBackwardDiv(Operands[0], CurrentTensor, Operands[1], 1);
             } break;
-            case op_BinaryMatmul: {
+            case op_binary_matmul: {
                 gzStackBlockPush(&StackState, Operands[1]);
                 gzStackBlockPush(&StackState, Operands[0]);
 
                 __gzBackwardMatMul(Operands, CurrentTensor, 0);
                 __gzBackwardMatMul(Operands, CurrentTensor, 1);
+            } break;
+            case op_binary_loss_cross_entropy: {
+                gzStackBlockPush(&StackState, Operands[0]);
+
+                reduce_method method = *(reduce_method *)CurrentTensor->Header->DerivedOp.op_context;
+                __gz_backward_loss_binary_cross_entropy(Operands[0], Operands[1], CurrentTensor, method);
             } break;
             default: assert(0, "invalid code path");
         }
@@ -637,6 +690,7 @@ gz_backprop(t32 *RootTensor) {
         StackState.ReservedBlock = gzAllocNewStackBlock(StackState.GlobalMaxTensorNum, NULL);
     }
 
+    /* TODO(Abid): In the end, add an Assert so that RootTensor should only have shape=(1). */
     PrevRootTensor = RootTensor;
 
     StackState.RunningTensorNum = 0;

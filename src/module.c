@@ -9,9 +9,9 @@
 #include "module.h"
 
 internal module *
-gz_linear(u32 InDim, u32 OutDim, mem_arena *Arena) {
-    module *Module = gzMemPushStruct(Arena, module);
-    Module->type = module_Linear;
+gz_module_linear(u32 InDim, u32 OutDim, mem_arena *Arena) {
+    module *Module = gz_mem_push_struct(module, Arena);
+    Module->type = module_linear;
 
     u32 WShape[] = {1, OutDim, InDim};
     u32 BShape[] = {1, OutDim};
@@ -40,34 +40,61 @@ gz_linear(u32 InDim, u32 OutDim, mem_arena *Arena) {
     return Module;
 }
 
+internal module *
+gz_module_sigmoid(mem_arena *arena) {
+    module *mod = gz_mem_push_struct(module, arena);
+    mod->type = module_sigmoid;
+
+    return mod;
+}
+
+internal module *
+gz_module_relu(mem_arena *arena) {
+    module *mod = gz_mem_push_struct(module, arena);
+    mod->type = module_relu;
+
+    return mod;
+}
+
 internal t32 *
-gz_module_run(module *Module, t32 *Input, mem_arena *Arena) {
-    t32 *Result = NULL;
+gz_module_run(module *module, t32 *input, mem_arena *arena) {
+    t32 *result = NULL;
 
-    switch(Module->type) {
-        case module_Linear: {
+    switch(module->type) {
+        case module_linear: {
             /* TODO(Abid): Implement backward for addmm to make it more efficient. */
-            t32 *W = Module->weights.array[0];
-            t32 *B = Module->weights.array[1];
-            assert(Input->Header->Dim == 2, "expected input dim to be 2");
-            assert(Input->Header->Sizes[1] == W->Header->Sizes[2], "input-linear shape mismatch");
+            t32 *w = module->weights.array[0];
+            t32 *b = module->weights.array[1];
+            assert(input->Header->Dim == 2, "expected input dim to be 2");
+            assert(input->Header->Sizes[1] == w->Header->Sizes[2], "input-linear shape mismatch");
 
-            u32 BatchSize = Input->Header->Sizes[0];
-            u32 InDim = Input->Header->Sizes[1];
-            u32 OutDim = W->Header->Sizes[1];
+            u32 batch_size = input->Header->Sizes[0];
+            u32 in_dim = input->Header->Sizes[1];
+            u32 out_dim = w->Header->Sizes[1];
 
-            u32 WXShape[] = {BatchSize, OutDim, 1};
-            t32 *WX = gz_tensor_empty(WXShape, f32, true, Arena);
-            u32 InputViewShape[] = {BatchSize, InDim, 1};
-            t32 *InputView = _gzNewView(Input, InputViewShape, gz_array_length(InputViewShape), Arena);
-            gzMatMul(W, InputView, WX);
+            u32 wx_shape[] = {batch_size, out_dim, 1};
+            t32 *wx = gz_tensor_empty(wx_shape, f32, true, arena);
+            u32 input_view_shape[] = {batch_size, in_dim, 1};
+            t32 *input_view = _gzNewView(input, input_view_shape, gz_array_length(input_view_shape), arena);
+            gzMatMul(w, input_view, wx);
 
-            u32 ResultShape[] = {BatchSize, OutDim};
-            Result = gz_tensor_empty(ResultShape, f32, true, Arena);
-            gzAdd(gzTrimUnitSize(WX, Arena), B, Result);
+            u32 result_shape[] = {batch_size, out_dim};
+            result = gz_tensor_empty(result_shape, f32, true, arena);
+            gzAdd(gz_trim_trailing_unit_size(wx, arena), b, result);
         } break;
+        case module_sigmoid: { result = gz_sigmoid(input, arena); } break;
+        case module_relu: { result = gz_relu(input, arena); } break;
         default: assert(0, "invalid code path"); break;
     }
 
-    return Result;
+    return result;
+}
+
+inline internal t32 *
+gz_module_run_all(module **modules, u64 module_length, t32 *input, mem_arena *arena) {
+    t32 *result = input;
+    for(u64 idx = 0; idx < module_length; ++idx)
+        result = gz_module_run(modules[idx], result, arena);
+
+    return result;
 }

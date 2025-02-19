@@ -9,8 +9,10 @@
 #if !defined(MODULE_H)
 
 typedef enum {
-    module_None,
-    module_Linear,
+    module_none,
+    module_linear,
+    module_sigmoid,
+    module_relu,
 } module_type;
 
 typedef struct {

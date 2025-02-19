@@ -9,33 +9,36 @@
 #if !defined(TENSOR_H)
 
 typedef enum {
-    storage_Data,
-    storage_Grad,
+    op_none = 0,
 
-} storage_type;
+    op_unary_begin,
 
-typedef enum {
-    op_None = 0,
+    op_unary_negate,
+    op_unary_broadcast,
+    op_unary_tranpose,
+    op_unary_tranpose_all,
+    op_unary_reduce_sum_all,
+    op_unary_sigmoid,
+    op_unary_relu,
+    op_unary_view,
 
-    op_UnaryNegate,
-    op_UnaryBroadcast,
-    op_UnaryTranpose,
-    op_UnaryTranposeAll,
-    op_UnaryReduceSumAll,
-    op_UnarySigmoid,
-    op_UnaryReLU,
-    op_UnaryView,
+    op_unary_end, /* NOTE(Abid): Marks the num after the end of unary ops, WARNING: should not be moved! */
 
-    op_UnaryEnd, /* NOTE(Abid): Marks the num after the end of unary ops, WARNING: should not be moved! */
+    op_binary_begin,
 
-    /* NOTE(Abid): Element wise ops */
-    op_BinaryAdd,
-    op_BinarySub,
-    op_BinaryMul,
-    op_BinaryDiv,
+    op_binary_add,
+    op_binary_sub,
+    op_binary_mul,
+    op_binary_div,
+    op_binary_matmul,
 
-    op_BinaryMatmul,
+    op_binary_end, /* NOTE(Abid): Marks the num after the end of binary ops, WARNING: should not be moved! */
 
+    op_loss_begin,
+
+    op_binary_loss_cross_entropy,
+
+    op_loss_end, /* NOTE(Abid): Marks the num after the end of binary ops, WARNING: should not be moved! */
 
 } tensor_op;
 
@@ -51,7 +54,7 @@ typedef struct {
 
     /* NOTE(Abid): This is used for storing context data related to operations,
      *             One of the main uses is to store the dimensions that transposed. */
-    void *OpContext;
+    void *op_context;
 } op_info;
 
 typedef struct {

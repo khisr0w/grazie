@@ -4,54 +4,48 @@
     |    Creation date:  3/9/2023 10:19:09 PM                                          |
     |    Last Modified:                                                                |
     |                                                                                  |
-    +======================================| Copyright © Sayed Abid Hashimi |==========+  */
+    +==================================================| Sayed Abid Hashimi |==========+  */
 
 #include "grazie.h"
 
 inline internal void
 train_xor(dataset *Xs, dataset *ys, f32 learning_rate, mem_arena *arena) {
     module *model[] = {
-        gz_linear(2, 10, arena),
-        gz_linear(10, 8, arena),
-        gz_linear(8,  1, arena)
+        gz_module_linear(2, 10, arena),
+        gz_module_relu(arena),
+        gz_module_linear(10, 8, arena),
+        gz_module_relu(arena),
+        gz_module_linear(8,  1, arena),
+        gz_module_sigmoid(arena),
     };
     tensor_list optim_list = gz_tensor_list_from_module_list(model, gz_array_length(model), arena);
 
     u32 num_epochs = 100;
     for(u32 epoch = 0; epoch < num_epochs; ++epoch) {
 
-        for(u64 data_point = 0; data_point < Xs->length; ++data_point) {
+        for(u64 idx = 0; idx < Xs->length; ++idx) {
             temp_memory train_session = gz_mem_temp_begin(arena);
 
             gz_grad_zero(optim_list);
-            t32 *input = dataset_index(Xs, data_point);
-            t32 *label = dataset_index(ys, data_point);
+            t32 *input = gz_dataset_index(Xs, idx);
+            t32 *y = gz_dataset_index(ys, idx);
 
-            t32 *x = gz_module_run(model[0], input, arena);
-            x = gz_relu(x, arena);
-            x = gz_module_run(model[1], x, arena);
-            x = gz_relu(x, arena);
-            x = gz_module_run(model[2], x, arena);
-            x = gz_sigmoid(x, arena);
+            t32 *y_hat = gz_module_run_all(model, gz_array_length(model), input, arena);
 
-            t32 *loss = gz_loss_binary_cross_entropy(x, label, reduce_mean, arena);
+            t32 *loss = gz_loss_binary_cross_entropy(y_hat, y, reduce_mean, arena);
             printf("Loss: %f\n", *(f32 *)loss->Data.Ptr);
             gz_backprop(loss);
-
             gz_optim_sgd(optim_list, learning_rate);
+
             gz_mem_temp_end(train_session);
         }
     }
 }
 
 i32 main() {
-    /* NOTE(Abid): To implement XOR NN, we need:
-     *             0. Non-Linearities(ReLU)      (DONE)
-     */
-
     mem_arena main_arena = gzMemArenaAllocate(gzMegabyte(100));
 
-    /* NOTE(Abid): Input */
+    /* NOTE(abid): Input */
     f32 train_X[] = {
         0.0, 0.0,
         0.0, 1.0,
@@ -65,14 +59,14 @@ i32 main() {
         0.0,
     };
 
-    f32 learning_rate = 0.003;
+    f32 learning_rate = 0.003f;
     u64 batch_size = 1;
     u64 X_shape[] = {2};
     u64 y_shape[] = {1};
-    dataset X = dataset_build(train_X, gz_array_length(train_X), batch_size, X_shape,
-                              gz_array_length(X_shape), &main_arena);
-    dataset y = dataset_build(train_y, gz_array_length(train_y), batch_size, y_shape,
-                              gz_array_length(y_shape), &main_arena);
+    dataset X = gz_dataset_build(train_X, gz_array_length(train_X), batch_size, X_shape,
+                                 gz_array_length(X_shape), &main_arena);
+    dataset y = gz_dataset_build(train_y, gz_array_length(train_y), batch_size, y_shape,
+                                 gz_array_length(y_shape), &main_arena);
 
     train_xor(&X, &y, learning_rate, &main_arena);
 
@@ -82,6 +76,28 @@ i32 main() {
     // }
 
     return(0);
+}
+
+i32 test_loss_binary_cross_entropy() {
+    mem_arena main_arena = gzMemArenaAllocate(gzMegabyte(100));
+
+    f32 y_hat_data[] = { 0.3f, 0.7f };
+    f32 y_data[] = { 1.0f, 0.f };
+    u32 y_shape[] = { 1, 2 };
+
+    t32 *y_hat = gz_tensor_from_array(y_shape, y_hat_data, f32, true, &main_arena);
+    t32 *y = gz_tensor_from_array(y_shape, y_data, f32, true, &main_arena);
+
+    t32 *loss = gz_loss_binary_cross_entropy(y_hat, y, reduce_mean, &main_arena);
+    gz_print(loss);
+
+    gz_backprop(loss);
+
+    gzSwapDataGrad(y_hat);
+    gz_print(y_hat);
+    gzSwapDataGrad(y_hat);
+
+    return 0;
 }
 
 #if 0

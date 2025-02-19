@@ -109,7 +109,7 @@ inline internal f64
 gzStatVar(f64_stat *Stat) {
     assert(Stat->Count > 0, "Cannot calculate variance for count < 1.");
     f64 StatMean = gzStatMean(Stat);
-    return (Stat->SumSquared - 2 * StatMean * (Stat->Sum) + Stat->Count*(StatMean*StatMean)) / fmax(Stat->Count - 1, 1);
+    return (Stat->SumSquared - 2 * StatMean * (Stat->Sum) + Stat->Count*(StatMean*StatMean)) / max(Stat->Count - 1, 1);
 }
 
 inline internal f64
